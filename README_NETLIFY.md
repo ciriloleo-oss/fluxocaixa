@@ -1,75 +1,62 @@
-# Meu Caixa - versão produção para Netlify
+# Meu Caixa - versão sem segredos no repositório
 
-## 1. Supabase
+Esta versão remove valores reais de `.env.example`, `README_NETLIFY.md`, `src/main.jsx` e impede que `dist`/`.env` subam para o GitHub.
 
-No Supabase, rode:
+## 1. Atualizar seu repositório
 
-1. `supabase/00_base.sql`
-2. Crie o usuário no Authentication
-3. Ajuste o email dentro de `supabase/01_seed_for_user.sql`
-4. Rode `supabase/01_seed_for_user.sql`
+Copie estes arquivos para a pasta do seu projeto substituindo os antigos.
 
-## 2. Variáveis locais
-
-Crie um arquivo `.env` baseado em `.env.example`:
-
-```env
-VITE_SUPABASE_URL=https://snfgqvnbklhljgorkknx.supabase.co
-VITE_SUPABASE_ANON_KEY=sua_anon_key
-SUPABASE_URL=https://snfgqvnbklhljgorkknx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
-```
-
-A `SERVICE_ROLE_KEY` não deve ir para o frontend. Use apenas no Netlify Functions.
-
-## 3. Rodar local
+Depois rode:
 
 ```bash
-npm install
-npm run dev
+rmdir /s /q dist
+git add .
+git commit -m "Remove secrets and prepare Netlify deploy"
+git push
 ```
 
-## 4. Publicar no Netlify
+Se `dist` não existir, ignore o erro do `rmdir`.
 
-Opção simples:
+## 2. Variáveis no Netlify
 
-1. Crie um repositório no GitHub
-2. Suba estes arquivos
-3. No Netlify: Add new site > Import from Git
-4. Build command: `npm run build`
-5. Publish directory: `dist`
+No Netlify, vá em:
 
-Variáveis no Netlify:
+Site configuration > Environment variables
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-## 5. Compartilhar com seu pai
-
-Crie um usuário para ele no Supabase Auth.
-
-Depois rode o `supabase/01_seed_for_user.sql` trocando o email pelo email dele, para criar contas e categorias iniciais.
-
-Cada usuário vê apenas os próprios dados por causa das políticas RLS.
-
-## 6. Endpoint para Atalhos iPhone / Android companion
-
-Depois de publicado, o webhook será:
+Crie estas variáveis com os valores reais somente no Netlify:
 
 ```text
-https://SEU-SITE.netlify.app/.netlify/functions/import-wallet
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
 ```
 
-Exemplo de POST:
+## 3. Redeploy
 
-```json
-{
-  "user_id": "UUID_DO_USUARIO",
-  "raw_message": "Compra de R$ 45,90 no cartão em Uber",
-  "bank_name": "Wallet"
-}
+Depois das variáveis:
+
+Deploys > Trigger deploy > Deploy site
+
+## 4. Importante sobre segurança
+
+- `.env` não deve ir para o GitHub.
+- `.env.example` pode ir, mas sem valores.
+- `dist` não deve ir para o GitHub.
+- `SUPABASE_SERVICE_ROLE_KEY` nunca deve aparecer no frontend nem no GitHub.
+
+## 5. Se o Netlify ainda bloquear
+
+Use esta variável no Netlify:
+
+```text
+SECRETS_SCAN_OMIT_KEYS
 ```
 
-No app, a transação aparecerá na aba **Importar**.
+Valor:
+
+```text
+VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,SUPABASE_URL
+```
+
+Não adicione `SUPABASE_SERVICE_ROLE_KEY` nessa lista se ela estiver aparecendo no código. Nesse caso, remova a chave do repo e gere uma nova no Supabase.

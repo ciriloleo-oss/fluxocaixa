@@ -4,9 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 import { ArrowDownCircle, ArrowUpCircle, BarChart3, Check, CreditCard, LogOut, Plus, RefreshCw, Search, Trash2, Wallet, X } from "lucide-react";
 import "./styles.css";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://snfgqvnbklhljgorkknx.supabase.co";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "COLE_SUA_ANON_KEY_NO_ENV";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("Variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY não configuradas.");
+}
+
+const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "");
 
 function money(v) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v || 0));
@@ -32,13 +36,18 @@ function parseAmount(text) {
 }
 
 function Login() {
-  const [email, setEmail] = useState("gestor@reservadaserra.com.br");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("login");
   const [msg, setMsg] = useState("");
 
   async function submit() {
     setMsg("");
+    if (!supabaseUrl || !supabaseAnonKey) {
+      setMsg("Configuração do Supabase ausente. Verifique as variáveis no Netlify.");
+      return;
+    }
+
     const fn = mode === "login" ? supabase.auth.signInWithPassword : supabase.auth.signUp;
     const { error } = await fn({ email, password });
     if (error) setMsg(error.message);
