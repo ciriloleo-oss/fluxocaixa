@@ -30,7 +30,7 @@ Publish directory: dist
 Configure as variáveis de ambiente:
 
 ```env
-VITE_SUPABASE_URL=https://snfgqvnbklhljgorkknx.supabase.co
+VITE_SUPABASE_URL=sua_url_supabase
 VITE_SUPABASE_ANON_KEY=sua_anon_key
 ```
 
