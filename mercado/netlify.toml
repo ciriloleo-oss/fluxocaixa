@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build"
+  command = "npm run build && mkdir -p dist/mercado && cp -r dist/assets dist/mercado/assets && cp dist/index.html dist/mercado/index.html"
   publish = "dist"
 
 [build.environment]
