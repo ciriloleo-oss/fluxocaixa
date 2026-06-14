@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserQRCodeReader } from '@zxing/browser';
 import type { IScannerControls } from '@zxing/browser';
 import { supabase } from './lib/supabase';
-import { Camera, Check, Circle, FileSearch, History, ListPlus, Plus, QrCode, RefreshCw, Save, ShoppingCart, Trash2 } from 'lucide-react';
+import { Camera, Check, Circle, FileSearch, History, ListPlus, Plus, QrCode, RefreshCw, Save, Search, ShoppingCart, Trash2 } from 'lucide-react';
 import './styles.css';
 
 type Product = {
@@ -47,10 +47,7 @@ type CouponImport = {
   created_at: string;
 };
 
-const brl = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL'
-});
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 function money(value?: number | null) {
   return brl.format(Number(value || 0));
@@ -72,8 +69,8 @@ function App() {
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState('un');
   const [price, setPrice] = useState(0);
-
   const [newListName, setNewListName] = useState('Compra Montserrat');
+  const [productSearch, setProductSearch] = useState('');
 
   const [purchaseProduct, setPurchaseProduct] = useState('');
   const [purchasePrice, setPurchasePrice] = useState(0);
@@ -101,13 +98,8 @@ function App() {
       supabase.from('coupon_imports').select('*').order('created_at', { ascending: false })
     ]);
 
-    if (!productsResponse.error) {
-      setProducts(productsResponse.data || []);
-    }
-
-    if (!couponsResponse.error) {
-      setCoupons(couponsResponse.data || []);
-    }
+    if (!productsResponse.error) setProducts(productsResponse.data || []);
+    if (!couponsResponse.error) setCoupons(couponsResponse.data || []);
 
     if (!listsResponse.error) {
       const loadedLists = listsResponse.data || [];
@@ -138,11 +130,7 @@ function App() {
   async function createList() {
     const { data, error } = await supabase
       .from('shopping_lists')
-      .insert({
-        name: newListName || 'Nova compra',
-        store_name: 'Montserrat Jundiaí',
-        status: 'open'
-      })
+      .insert({ name: newListName || 'Nova compra', store_name: 'Montserrat Jundiaí', status: 'open' })
       .select()
       .single();
 
@@ -179,32 +167,48 @@ function App() {
     }
   }
 
-  async function toggleItem(item: ListItem) {
-    await supabase
-      .from('shopping_list_items')
-      .update({ checked: !item.checked })
-      .eq('id', item.id);
 
+  async function addProductFromHistory(product: Product) {
+    if (!activeList) {
+      alert('Crie ou selecione uma lista antes de adicionar produtos.');
+      return;
+    }
+
+    const estimated = Number(product.last_price || product.avg_price || 0);
+
+    const { error } = await supabase.from('shopping_list_items').insert({
+      list_id: activeList.id,
+      product_id: product.id,
+      product_name: product.name,
+      quantity: 1,
+      unit: product.default_unit || 'un',
+      estimated_unit_price: estimated
+    });
+
+    if (error) {
+      alert(`Erro ao adicionar produto: ${error.message}`);
+      return;
+    }
+
+    await loadItems(activeList.id);
+    await refreshListTotals();
+  }
+
+  async function toggleItem(item: ListItem) {
+    await supabase.from('shopping_list_items').update({ checked: !item.checked }).eq('id', item.id);
     await loadItems(item.list_id);
     await refreshListTotals();
   }
 
   async function removeItem(item: ListItem) {
-    await supabase
-      .from('shopping_list_items')
-      .delete()
-      .eq('id', item.id);
-
+    await supabase.from('shopping_list_items').delete().eq('id', item.id);
     await loadItems(item.list_id);
     await refreshListTotals();
   }
 
   async function refreshListTotals() {
     if (!activeList) return;
-
-    await supabase.rpc('recalculate_list_totals', {
-      p_list_id: activeList.id
-    });
+    await supabase.rpc('recalculate_list_totals', { p_list_id: activeList.id });
 
     const { data } = await supabase
       .from('shopping_lists')
@@ -221,17 +225,9 @@ function App() {
     if (!purchaseProduct.trim() || !purchasePrice) return;
 
     const name = normalizeName(purchaseProduct);
-
     const { data: product, error: productError } = await supabase
       .from('products')
-      .upsert(
-        {
-          name,
-          default_unit: purchaseUnit,
-          category: null
-        },
-        { onConflict: 'name' }
-      )
+      .upsert({ name, default_unit: purchaseUnit, category: null }, { onConflict: 'name' })
       .select()
       .single();
 
@@ -259,6 +255,8 @@ function App() {
     const cleanUrl = url.trim();
     if (!cleanUrl) return;
 
+    setScanMessage('Salvando QR Code...');
+
     const { error } = await supabase.from('coupon_imports').insert({
       qr_url: cleanUrl,
       store_name: 'Montserrat Jundiaí',
@@ -268,13 +266,12 @@ function App() {
 
     if (!error) {
       setQrUrl('');
-      setScanMessage('QR Code salvo. Vá em Cupons e clique em Importar.');
+      setScanMessage('QR Code salvo. Vá em "Cupons" e clique em "Importar".');
       await loadCoupons();
     } else {
       setScanMessage(error.message);
     }
   }
-
 
   async function importCoupon(coupon: CouponImport) {
     setImportingId(coupon.id);
@@ -296,18 +293,22 @@ function App() {
   }
 
   const predictedTotal = useMemo(() => {
-    return items.reduce((total, item) => {
-      return total + Number(item.quantity || 0) * Number(item.estimated_unit_price || 0);
-    }, 0);
+    return items.reduce((total, item) => total + Number(item.quantity || 0) * Number(item.estimated_unit_price || 0), 0);
   }, [items]);
 
   const checkedTotal = useMemo(() => {
     return items
       .filter(item => item.checked)
-      .reduce((total, item) => {
-        return total + Number(item.quantity || 0) * Number(item.estimated_unit_price || 0);
-      }, 0);
+      .reduce((total, item) => total + Number(item.quantity || 0) * Number(item.estimated_unit_price || 0), 0);
   }, [items]);
+
+
+  const filteredProducts = useMemo(() => {
+    const query = normalizeName(productSearch);
+    return products
+      .filter(product => !query || product.name.includes(query))
+      .slice(0, 80);
+  }, [products, productSearch]);
 
   return (
     <div className="app">
@@ -320,131 +321,93 @@ function App() {
       </header>
 
       <nav>
-        <button className={tab === 'lista' ? 'active' : ''} onClick={() => setTab('lista')}>
-          <ShoppingCart size={18} /> Lista
-        </button>
-        <button className={tab === 'historico' ? 'active' : ''} onClick={() => setTab('historico')}>
-          <History size={18} /> Histórico
-        </button>
-        <button className={tab === 'scanner' ? 'active' : ''} onClick={() => setTab('scanner')}>
-          <QrCode size={18} /> Scanner
-        </button>
-        <button className={tab === 'cupons' ? 'active' : ''} onClick={() => { setTab('cupons'); loadCoupons(); }}>
-          <FileSearch size={18} /> Cupons
-        </button>
+        <button className={tab === 'lista' ? 'active' : ''} onClick={() => setTab('lista')}><ShoppingCart size={18} /> Lista</button>
+        <button className={tab === 'historico' ? 'active' : ''} onClick={() => setTab('historico')}><History size={18} /> Histórico</button>
+        <button className={tab === 'scanner' ? 'active' : ''} onClick={() => setTab('scanner')}><QrCode size={18} /> Scanner</button>
+        <button className={tab === 'cupons' ? 'active' : ''} onClick={() => { setTab('cupons'); loadCoupons(); }}><FileSearch size={18} /> Cupons</button>
       </nav>
 
       {tab === 'lista' && (
         <main className="grid">
           <section className="card">
             <h2>Nova lista</h2>
-
             <div className="row">
-              <input
-                value={newListName}
-                onChange={event => setNewListName(event.target.value)}
-                placeholder="Nome da lista"
-              />
-              <button onClick={createList}>
-                <ListPlus size={18} /> Criar
-              </button>
+              <input value={newListName} onChange={event => setNewListName(event.target.value)} placeholder="Nome da lista" />
+              <button onClick={createList}><ListPlus size={18} /> Criar</button>
             </div>
-
-            <select
-              value={activeList?.id || ''}
-              onChange={event => {
-                const selectedList = lists.find(list => list.id === event.target.value) || null;
-                setActiveList(selectedList);
-              }}
-            >
+            <select value={activeList?.id || ''} onChange={event => setActiveList(lists.find(list => list.id === event.target.value) || null)}>
               <option value="">Selecione uma lista</option>
-              {lists.map(list => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
+              {lists.map(list => <option key={list.id} value={list.id}>{list.name}</option>)}
             </select>
           </section>
 
           <section className="card">
-            <h2>Adicionar item</h2>
-
-            <input
-              list="products"
-              value={productName}
-              onChange={event => setProductName(event.target.value)}
-              placeholder="Produto"
-            />
-
+            <h2>Adicionar item manual</h2>
+            <input list="products" value={productName} onChange={event => setProductName(event.target.value)} placeholder="Produto" />
             <datalist id="products">
               {products.map(product => (
-                <option key={product.id} value={product.name}>
-                  {product.name} • {money(product.last_price || product.avg_price)}
-                </option>
+                <option key={product.id} value={product.name}>{product.name} • {money(product.last_price || product.avg_price)}</option>
               ))}
             </datalist>
-
             <div className="row compact">
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={qty}
-                onChange={event => setQty(Number(event.target.value))}
-              />
+              <input type="number" min="0.01" step="0.01" value={qty} onChange={event => setQty(Number(event.target.value))} />
               <input value={unit} onChange={event => setUnit(event.target.value)} />
+              <input type="number" min="0" step="0.01" value={price} onChange={event => setPrice(Number(event.target.value))} placeholder="Preço opcional" />
+            </div>
+            <button onClick={addItem}><Plus size={18} /> Adicionar à lista</button>
+          </section>
+
+
+          <section className="card wide">
+            <h2>Produtos do histórico</h2>
+            <div className="searchBox">
+              <Search size={18} />
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={price}
-                onChange={event => setPrice(Number(event.target.value))}
-                placeholder="Preço opcional"
+                value={productSearch}
+                onChange={event => setProductSearch(event.target.value)}
+                placeholder="Buscar produto já comprado..."
               />
             </div>
 
-            <button onClick={addItem}>
-              <Plus size={18} /> Adicionar à lista
-            </button>
+            <div className="productPicker">
+              {filteredProducts.map(product => (
+                <div className="productOption" key={product.id}>
+                  <div>
+                    <strong>{product.name}</strong>
+                    <span>
+                      Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}
+                    </span>
+                  </div>
+                  <button onClick={() => addProductFromHistory(product)}>
+                    <Plus size={16} /> Adicionar
+                  </button>
+                </div>
+              ))}
+
+              {filteredProducts.length === 0 && (
+                <p className="empty">Nenhum produto encontrado no histórico ainda.</p>
+              )}
+            </div>
           </section>
 
           <section className="card wide">
             <div className="summary">
-              <div>
-                <span>Previsto</span>
-                <strong>{money(predictedTotal)}</strong>
-              </div>
-              <div>
-                <span>Já pego</span>
-                <strong>{money(checkedTotal)}</strong>
-              </div>
-              <div>
-                <span>Restante</span>
-                <strong>{money(predictedTotal - checkedTotal)}</strong>
-              </div>
+              <div><span>Previsto</span><strong>{money(predictedTotal)}</strong></div>
+              <div><span>Já pego</span><strong>{money(checkedTotal)}</strong></div>
+              <div><span>Restante</span><strong>{money(predictedTotal - checkedTotal)}</strong></div>
             </div>
 
             <div className="items">
               {items.map(item => (
                 <div className={'item ' + (item.checked ? 'done' : '')} key={item.id}>
-                  <button className="check" onClick={() => toggleItem(item)}>
-                    {item.checked ? <Check size={18} /> : <Circle size={18} />}
-                  </button>
-
+                  <button className="check" onClick={() => toggleItem(item)}>{item.checked ? <Check size={18} /> : <Circle size={18} />}</button>
                   <div className="itemMain">
                     <strong>{item.product_name}</strong>
-                    <span>
-                      {item.quantity} {item.unit} × {money(item.estimated_unit_price)} ={' '}
-                      {money(item.quantity * item.estimated_unit_price)}
-                    </span>
+                    <span>{item.quantity} {item.unit} × {money(item.estimated_unit_price)} = {money(item.quantity * item.estimated_unit_price)}</span>
                   </div>
-
-                  <button className="icon" onClick={() => removeItem(item)}>
-                    <Trash2 size={18} />
-                  </button>
+                  <button className="icon" onClick={() => removeItem(item)}><Trash2 size={18} /></button>
                 </div>
               ))}
-
               {items.length === 0 && <p className="empty">Crie uma lista e adicione os primeiros itens.</p>}
             </div>
           </section>
@@ -455,40 +418,17 @@ function App() {
         <main className="grid">
           <section className="card">
             <h2>Registrar preço manual</h2>
-
-            <input
-              value={purchaseProduct}
-              onChange={event => setPurchaseProduct(event.target.value)}
-              placeholder="Produto comprado"
-            />
-
+            <input value={purchaseProduct} onChange={event => setPurchaseProduct(event.target.value)} placeholder="Produto comprado" />
             <div className="row compact">
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={purchaseQty}
-                onChange={event => setPurchaseQty(Number(event.target.value))}
-              />
+              <input type="number" min="0.01" step="0.01" value={purchaseQty} onChange={event => setPurchaseQty(Number(event.target.value))} />
               <input value={purchaseUnit} onChange={event => setPurchaseUnit(event.target.value)} />
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={purchasePrice}
-                onChange={event => setPurchasePrice(Number(event.target.value))}
-                placeholder="Preço unitário"
-              />
+              <input type="number" min="0" step="0.01" value={purchasePrice} onChange={event => setPurchasePrice(Number(event.target.value))} placeholder="Preço unitário" />
             </div>
-
-            <button onClick={saveManualPurchase}>
-              <Save size={18} /> Salvar no histórico
-            </button>
+            <button onClick={saveManualPurchase}><Save size={18} /> Salvar no histórico</button>
           </section>
 
           <section className="card wide">
             <h2>Produtos conhecidos</h2>
-
             <div className="table">
               {products.map(product => (
                 <div className="tableRow" key={product.id}>
@@ -506,27 +446,10 @@ function App() {
         <main className="grid">
           <section className="card wide">
             <h2>Scanner NFC-e</h2>
-            <p className="muted">
-              Cole o link do QR Code ou use a câmera. Depois vá em Cupons para importar os itens.
-            </p>
-
-            <QrScanner
-              onDetected={value => {
-                setQrUrl(value);
-                saveQrLink(value);
-              }}
-            />
-
-            <textarea
-              value={qrUrl}
-              onChange={event => setQrUrl(event.target.value)}
-              placeholder="Cole aqui a URL do QR Code do cupom NFC-e"
-            />
-
-            <button onClick={() => saveQrLink(qrUrl)}>
-              <Save size={18} /> Salvar QR Code
-            </button>
-
+            <p className="muted">Cole o link do QR Code ou use a câmera. Depois vá em "Cupons" para importar os itens.</p>
+            <QrScanner onDetected={value => { setQrUrl(value); saveQrLink(value); }} />
+            <textarea value={qrUrl} onChange={event => setQrUrl(event.target.value)} placeholder="Cole aqui a URL do QR Code do cupom NFC-e" />
+            <button onClick={() => saveQrLink(qrUrl)}><Save size={18} /> Salvar QR Code</button>
             {scanMessage && <p className="notice">{scanMessage}</p>}
           </section>
         </main>
@@ -576,18 +499,13 @@ function QrScanner({ onDetected }: { onDetected: (value: string) => void }) {
 
     try {
       setRunning(true);
-
-      controlsRef.current = await reader.decodeFromVideoDevice(
-        undefined,
-        videoRef.current!,
-        (result) => {
-          if (result) {
-            onDetected(result.getText());
-            controlsRef.current?.stop();
-            setRunning(false);
-          }
+      controlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current!, (result) => {
+        if (result) {
+          onDetected(result.getText());
+          controlsRef.current?.stop();
+          setRunning(false);
         }
-      );
+      });
     } catch {
       setRunning(false);
       alert('Não consegui abrir a câmera. Verifique as permissões do navegador.');
