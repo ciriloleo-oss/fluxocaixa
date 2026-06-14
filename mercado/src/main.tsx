@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserQRCodeReader } from '@zxing/browser';
 import type { IScannerControls } from '@zxing/browser';
 import { supabase } from './lib/supabase';
-import { Camera, Check, Circle, History, ListPlus, Plus, QrCode, Save, ShoppingCart, Trash2 } from 'lucide-react';
+import { Camera, Check, Circle, FileSearch, History, ListPlus, Plus, QrCode, RefreshCw, Save, ShoppingCart, Trash2 } from 'lucide-react';
 import './styles.css';
 
 type Product = {
@@ -35,6 +35,18 @@ type ListItem = {
   checked: boolean;
 };
 
+type CouponImport = {
+  id: string;
+  qr_url: string;
+  uf: string | null;
+  store_name: string | null;
+  status: string;
+  imported_items: number | null;
+  processed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+};
+
 const brl = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL'
@@ -49,11 +61,12 @@ function normalizeName(value: string) {
 }
 
 function App() {
-  const [tab, setTab] = useState<'lista' | 'historico' | 'scanner'>('lista');
+  const [tab, setTab] = useState<'lista' | 'historico' | 'scanner' | 'cupons'>('lista');
   const [products, setProducts] = useState<Product[]>([]);
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [activeList, setActiveList] = useState<ShoppingList | null>(null);
   const [items, setItems] = useState<ListItem[]>([]);
+  const [coupons, setCoupons] = useState<CouponImport[]>([]);
 
   const [productName, setProductName] = useState('');
   const [qty, setQty] = useState(1);
@@ -69,6 +82,7 @@ function App() {
 
   const [qrUrl, setQrUrl] = useState('');
   const [scanMessage, setScanMessage] = useState('');
+  const [importingId, setImportingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -81,13 +95,18 @@ function App() {
   }, [activeList?.id]);
 
   async function loadAll() {
-    const [productsResponse, listsResponse] = await Promise.all([
+    const [productsResponse, listsResponse, couponsResponse] = await Promise.all([
       supabase.from('product_price_summary').select('*').order('name'),
-      supabase.from('shopping_lists').select('*').order('created_at', { ascending: false })
+      supabase.from('shopping_lists').select('*').order('created_at', { ascending: false }),
+      supabase.from('coupon_imports').select('*').order('created_at', { ascending: false })
     ]);
 
     if (!productsResponse.error) {
       setProducts(productsResponse.data || []);
+    }
+
+    if (!couponsResponse.error) {
+      setCoupons(couponsResponse.data || []);
     }
 
     if (!listsResponse.error) {
@@ -105,6 +124,15 @@ function App() {
       .order('created_at');
 
     setItems(data || []);
+  }
+
+  async function loadCoupons() {
+    const { data } = await supabase
+      .from('coupon_imports')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    setCoupons(data || []);
   }
 
   async function createList() {
@@ -240,10 +268,31 @@ function App() {
 
     if (!error) {
       setQrUrl('');
-      setScanMessage('QR Code salvo. Próximo passo: importar os itens da NFC-e automaticamente.');
+      setScanMessage('QR Code salvo. Vá em Cupons e clique em Importar.');
+      await loadCoupons();
     } else {
       setScanMessage(error.message);
     }
+  }
+
+
+  async function importCoupon(coupon: CouponImport) {
+    setImportingId(coupon.id);
+
+    const { data, error } = await supabase.functions.invoke('import-nfce-sp', {
+      body: { coupon_import_id: coupon.id }
+    });
+
+    if (error) {
+      alert(`Erro ao importar cupom: ${error.message}`);
+    } else if (data?.ok) {
+      alert(`Cupom importado com sucesso. Itens importados: ${data.imported_items}`);
+    } else {
+      alert(data?.error || 'Não foi possível importar o cupom.');
+    }
+
+    setImportingId(null);
+    await loadAll();
   }
 
   const predictedTotal = useMemo(() => {
@@ -279,6 +328,9 @@ function App() {
         </button>
         <button className={tab === 'scanner' ? 'active' : ''} onClick={() => setTab('scanner')}>
           <QrCode size={18} /> Scanner
+        </button>
+        <button className={tab === 'cupons' ? 'active' : ''} onClick={() => { setTab('cupons'); loadCoupons(); }}>
+          <FileSearch size={18} /> Cupons
         </button>
       </nav>
 
@@ -455,8 +507,7 @@ function App() {
           <section className="card wide">
             <h2>Scanner NFC-e</h2>
             <p className="muted">
-              Cole o link do QR Code ou use a câmera. Nesta versão, o app salva o link da NFC-e SP para posterior
-              importação dos itens.
+              Cole o link do QR Code ou use a câmera. Depois vá em Cupons para importar os itens.
             </p>
 
             <QrScanner
@@ -477,6 +528,37 @@ function App() {
             </button>
 
             {scanMessage && <p className="notice">{scanMessage}</p>}
+          </section>
+        </main>
+      )}
+
+      {tab === 'cupons' && (
+        <main className="grid">
+          <section className="card wide">
+            <div className="row">
+              <h2>Cupons NFC-e</h2>
+              <button onClick={loadCoupons}><RefreshCw size={18} /> Atualizar</button>
+            </div>
+
+            <div className="items">
+              {coupons.map(coupon => (
+                <div className="item" key={coupon.id}>
+                  <div className="itemMain">
+                    <strong>Status: {coupon.status}</strong>
+                    <span>{coupon.store_name || 'Mercado'} • {new Date(coupon.created_at).toLocaleString('pt-BR')}</span>
+                    <span>Itens importados: {coupon.imported_items || 0}</span>
+                    {coupon.error_message && <span className="muted">Erro: {coupon.error_message}</span>}
+                    <span className="muted">{coupon.qr_url.slice(0, 110)}...</span>
+                  </div>
+
+                  <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id || coupon.status === 'imported'}>
+                    {importingId === coupon.id ? 'Importando...' : coupon.status === 'imported' ? 'Importado' : 'Importar'}
+                  </button>
+                </div>
+              ))}
+
+              {coupons.length === 0 && <p className="empty">Nenhum cupom salvo ainda.</p>}
+            </div>
           </section>
         </main>
       )}
