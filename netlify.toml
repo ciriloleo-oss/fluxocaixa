@@ -1,11 +1,11 @@
 [build]
-  command = "npm run build"
+  command = "npm run build && mkdir -p dist/mercado && cp -r dist/assets dist/mercado/assets && cp dist/index.html dist/mercado/index.html"
   publish = "dist"
 
-[functions]
-  directory = "netlify/functions"
+[build.environment]
+  NODE_VERSION = "20"
 
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
+  from = "/mercado/*"
+  to = "/mercado/index.html"
   status = 200
