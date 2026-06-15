@@ -14,3 +14,34 @@ input,select,textarea{width:100%;border:1px solid var(--line);border-radius:18px
 .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}.summary div{background:var(--soft);border-radius:20px;padding:16px}.summary span{display:block;color:var(--muted);font-size:13px;font-weight:800}.summary strong{display:block;margin-top:4px;font-size:clamp(20px,4vw,28px)}.manualAdd{border:1px dashed var(--line);border-radius:22px;padding:14px;margin-bottom:16px;background:#fbfdf9}.threeFields{display:grid;grid-template-columns:1fr 110px 1fr;gap:10px}.items{display:flex;flex-direction:column;gap:10px}.item{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:12px}.item.done .itemMain{opacity:.55;text-decoration:line-through}.itemMain{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.itemMain strong{font-size:15px;overflow-wrap:anywhere}.itemMain span{color:var(--muted);font-size:13px;line-height:1.35}.check,.icon{flex:0 0 auto!important;width:40px;height:40px;padding:0!important;border-radius:999px!important}
 .searchBox{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:0 12px;margin-bottom:12px}.searchBox svg{color:var(--muted);flex:0 0 auto}.searchBox input{border:0;margin:0;padding-left:0;box-shadow:none}.searchBox input:focus{border:0;box-shadow:none}.productPicker{display:grid;gap:10px;max-height:520px;overflow:auto;padding-right:4px}.productOption{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:13px}.productOption div{min-width:0}.productOption strong{display:block;font-size:14px;overflow-wrap:anywhere}.productOption span{display:block;color:var(--muted);font-size:12px;margin-top:4px}.productOption button{flex:0 0 auto;white-space:nowrap}.scanner video{width:100%;max-height:320px;background:#111;border-radius:20px;margin-bottom:10px;object-fit:cover}.notice{background:var(--soft);color:var(--accent-dark);padding:12px;border-radius:16px;font-weight:800}
 @media(max-width:860px){.appShell{grid-template-columns:1fr}.sideNav{position:sticky;top:0;z-index:30;height:auto;flex-direction:row;overflow-x:auto;padding:10px}.brand{display:none}.sideNav button{flex:1 0 auto;min-width:92px;font-size:13px;justify-content:center}.workspace{padding:16px 12px 32px}.pageHeader{align-items:flex-start;flex-direction:column}.pill{width:100%;text-align:center}.pageGrid{grid-template-columns:1fr}.heroStats,.summary{grid-template-columns:1fr}.inlineForm,.threeFields{grid-template-columns:1fr}.cardTop,.productOption{align-items:stretch;flex-direction:column}.productOption button,.actions button{width:100%}.item{flex-wrap:wrap;align-items:flex-start}.itemMain{width:calc(100% - 52px)}.item>button:last-child:not(.check):not(.icon){width:100%;justify-content:center;margin-top:8px}}
+
+.qtyEditor {
+  display: inline-grid;
+  grid-template-columns: 38px minmax(80px, 110px) 38px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  max-width: 210px;
+}
+
+.qtyEditor button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.qtyEditor input {
+  margin: 0;
+  text-align: center;
+  padding: 9px 8px;
+  border-radius: 14px;
+}
+
+@media (max-width: 860px) {
+  .qtyEditor {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: 42px 1fr 42px;
+  }
+}
