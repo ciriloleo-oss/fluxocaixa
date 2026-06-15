@@ -1,6 +1,6 @@
 {
-  "name": "fluxo-caixa-producao",
-  "version": "1.0.0",
+  "name": "mercado-compra-inteligente",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,16 +9,17 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.4",
-    "@vitejs/plugin-react": "^4.4.1",
-    "vite": "^6.3.5",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "lucide-react": "^0.511.0"
+    "@supabase/supabase-js": "^2.45.4",
+    "@zxing/browser": "^0.1.5",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.5.3",
-    "autoprefixer": "^10.4.21"
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
   }
 }
