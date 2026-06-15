@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserQRCodeReader } from '@zxing/browser';
 import type { IScannerControls } from '@zxing/browser';
 import { supabase } from './lib/supabase';
-import { BarChart3, Camera, Check, Circle, Copy, FileSearch, Home, ListChecks, ListPlus, PackageSearch, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2 } from 'lucide-react';
+import { BarChart3, Camera, Check, Circle, Copy, FileSearch, Home, ListChecks, ListPlus, Minus, PackageSearch, Plus, RefreshCw, Save, Search, ShoppingCart, Trash2 } from 'lucide-react';
 import './styles.css';
 
 type Product = { id:string; name:string; category:string|null; default_unit:string|null; last_price:number|null; avg_price:number|null };
