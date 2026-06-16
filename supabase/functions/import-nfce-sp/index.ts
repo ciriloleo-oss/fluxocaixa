@@ -77,6 +77,24 @@ function normalizeProductName(name: string) {
     .toUpperCase();
 }
 
+function inferCategory(productName: string) {
+  const name = productName.toUpperCase();
+
+  const rules: Array<[string, RegExp]> = [
+    ['Hortifruti', /(ALFACE|RUCULA|RÚCULA|TOMATE|BATATA|CEBOLA|ALHO|CENOURA|BANANA|MACA|MAÇÃ|LARANJA|LIMAO|LIMÃO|UVA|MANGA|ABACATE|ABACAXI|MELANCIA|MELAO|MELÃO|VERDURA|LEGUME)/i],
+    ['Laticínios', /(LEITE|IOGURTE|QUEIJO|MANTEIGA|REQUEIJAO|REQUEIJÃO|CREME DE LEITE|LEITE CONDENSADO|MUSSARELA|MOZZARELLA|PARMESAO|PARMESÃO)/i],
+    ['Mercearia', /(ARROZ|FEIJAO|FEIJÃO|MACARRAO|MACARRÃO|MOLHO|OLEO|ÓLEO|AZEITE|FARINHA|ACUCAR|AÇUCAR|AÇÚCAR|CAFE|CAFÉ|SAL|TEMPERO|MILHO|ERVILHA|SARDINHA|ATUM|EXTRATO|BISCOITO|BOLACHA|PAO|PÃO|TORRADA|CEREAL|AVEIA|GRANOLA)/i],
+    ['Carnes e Frios', /(CARNE|FRANGO|LINGUICA|LINGUIÇA|PEIXE|BACON|PRESUNTO|MORTADELA|SALSICHA|HAMBURGUER|HAMBÚRGUER|PICANHA|ACEM|ACÉM|COXAO|COXÃO|PATINHO)/i],
+    ['Bebidas', /(CERVEJA|REFRIGERANTE|SUCO|AGUA|ÁGUA|ENERGETICO|ENERGÉTICO|VINHO|BEBIDA|CHA|CHÁ|COCA|GUARANA|GUARANÁ)/i],
+    ['Limpeza', /(DETERGENTE|SABAO|SABÃO|AMACIANTE|DESINFETANTE|AGUA SANITARIA|ÁGUA SANITÁRIA|LIMPADOR|ESPONJA|VEJA|MULTIUSO|ALCOOL|ÁLCOOL|LAVA ROUPAS|LAVA-ROUPAS)/i],
+    ['Higiene', /(PAPEL HIGIENICO|PAPEL HIGIÊNICO|SABONETE|SHAMPOO|CONDICIONADOR|CREME DENTAL|PASTA DENTAL|ESCOVA|DESODORANTE|ABSORVENTE|FRALDA|HIGIENE)/i],
+    ['Pet', /(RACAO|RAÇÃO|PET|GATO|CAO|CÃO|CACHORRO|AREIA SANITARIA|AREIA SANITÁRIA)/i],
+    ['Congelados', /(SORVETE|PIZZA|LASANHA|CONGELADO|BATATA FRITA|NUGGET|POLPA)/i]
+  ];
+
+  return rules.find(([, regex]) => regex.test(name))?.[0] || 'Outros';
+}
+
 function parseItemsFromText(text: string): ParsedItem[] {
   const items: ParsedItem[] = [];
 
@@ -264,6 +282,7 @@ Deno.serve(async req => {
           {
             name: item.name,
             default_unit: item.unit,
+            category: inferCategory(item.name),
           },
           { onConflict: 'name' }
         )

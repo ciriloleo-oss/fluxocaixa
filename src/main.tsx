@@ -21,6 +21,7 @@ import {
   Search,
   ShoppingCart,
   Store,
+  Tag,
   Trash2
 } from 'lucide-react';
 import './styles.css';
@@ -111,6 +112,59 @@ function formatDate(value?: string | null) {
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
+}
+
+const CATEGORY_ORDER = [
+  'Hortifruti',
+  'Laticínios',
+  'Mercearia',
+  'Carnes e Frios',
+  'Bebidas',
+  'Limpeza',
+  'Higiene',
+  'Congelados',
+  'Pet',
+  'Outros'
+];
+
+function inferCategory(productName: string) {
+  const name = normalizeName(productName);
+
+  const rules: Array<[string, RegExp]> = [
+    ['Hortifruti', /(ALFACE|RUCULA|RÚCULA|TOMATE|BATATA|CEBOLA|ALHO|CENOURA|BANANA|MACA|MAÇÃ|LARANJA|LIMAO|LIMÃO|UVA|MANGA|ABACATE|ABACAXI|MELANCIA|MELAO|MELÃO|VERDURA|LEGUME)/i],
+    ['Laticínios', /(LEITE|IOGURTE|QUEIJO|MANTEIGA|REQUEIJAO|REQUEIJÃO|CREME DE LEITE|LEITE CONDENSADO|MUSSARELA|MOZZARELLA|PARMESAO|PARMESÃO)/i],
+    ['Mercearia', /(ARROZ|FEIJAO|FEIJÃO|MACARRAO|MACARRÃO|MOLHO|OLEO|ÓLEO|AZEITE|FARINHA|ACUCAR|AÇUCAR|AÇÚCAR|CAFE|CAFÉ|SAL|TEMPERO|MILHO|ERVILHA|SARDINHA|ATUM|EXTRATO|BISCOITO|BOLACHA|PAO|PÃO|TORRADA|CEREAL|AVEIA|GRANOLA)/i],
+    ['Carnes e Frios', /(CARNE|FRANGO|LINGUICA|LINGUIÇA|PEIXE|BACON|PRESUNTO|MORTADELA|SALSICHA|HAMBURGUER|HAMBÚRGUER|PICANHA|ACEM|ACÉM|COXAO|COXÃO|PATINHO)/i],
+    ['Bebidas', /(CERVEJA|REFRIGERANTE|SUCO|AGUA|ÁGUA|ENERGETICO|ENERGÉTICO|VINHO|BEBIDA|CHA|CHÁ|COCA|GUARANA|GUARANÁ)/i],
+    ['Limpeza', /(DETERGENTE|SABAO|SABÃO|AMACIANTE|DESINFETANTE|AGUA SANITARIA|ÁGUA SANITÁRIA|LIMPADOR|ESPONJA|VEJA|MULTIUSO|ALCOOL|ÁLCOOL|LAVA ROUPAS|LAVA-ROUPAS)/i],
+    ['Higiene', /(PAPEL HIGIENICO|PAPEL HIGIÊNICO|SABONETE|SHAMPOO|CONDICIONADOR|CREME DENTAL|PASTA DENTAL|ESCOVA|DESODORANTE|ABSORVENTE|FRALDA|HIGIENE)/i],
+    ['Pet', /(RACAO|RAÇÃO|PET|GATO|CAO|CÃO|CACHORRO|AREIA SANITARIA|AREIA SANITÁRIA)/i],
+    ['Congelados', /(SORVETE|PIZZA|LASANHA|CONGELADO|BATATA FRITA|NUGGET|POLPA)/i]
+  ];
+
+  return rules.find(([, regex]) => regex.test(name))?.[0] || 'Outros';
+}
+
+function getProductCategory(productName: string, products: Product[]) {
+  const product = products.find(item => item.name === productName);
+  return product?.category || inferCategory(productName);
+}
+
+function groupItemsByCategory(items: ListItem[], products: Product[]) {
+  const map = new Map<string, ListItem[]>();
+
+  for (const item of items) {
+    const category = getProductCategory(item.product_name, products);
+    const current = map.get(category) || [];
+    current.push(item);
+    map.set(category, current);
+  }
+
+  return Array.from(map.entries()).sort(([a], [b]) => {
+    const ia = CATEGORY_ORDER.indexOf(a);
+    const ib = CATEGORY_ORDER.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib) || a.localeCompare(b);
+  });
 }
 
 function getMarket(list?: ShoppingList | null) {
@@ -443,7 +497,7 @@ function App() {
     const name = normalizeName(purchaseProduct);
     const { data: product, error: productError } = await supabase
       .from('products')
-      .upsert({ name, default_unit: purchaseUnit, category: null }, { onConflict: 'name' })
+      .upsert({ name, default_unit: purchaseUnit, category: inferCategory(name) }, { onConflict: 'name' })
       .select()
       .single();
 
@@ -707,7 +761,7 @@ function App() {
                 <button onClick={addItem}><Plus size={18} /> Adicionar</button>
               </div>
 
-              <ItemList items={items} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
+              <ItemList items={items} products={products} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
             </section>
 
             <section className="card wide">
@@ -906,11 +960,13 @@ function PurchaseCard({
 
 function ItemList({
   items,
+  products,
   onToggle,
   onRemove,
   onQuantityChange
 }: {
   items: ListItem[];
+  products: Product[];
   onToggle: (item: ListItem) => void;
   onRemove: (item: ListItem) => void;
   onQuantityChange: (item: ListItem, quantity: number) => void;
@@ -920,19 +976,21 @@ function ItemList({
 
   return (
     <div className="marketList">
-      <ItemGroup
+      <CategorizedItemGroups
         title="Pendentes"
         subtitle={`${pendingItems.length} item(ns) para pegar`}
         items={pendingItems}
+        products={products}
         onToggle={onToggle}
         onRemove={onRemove}
         onQuantityChange={onQuantityChange}
       />
 
-      <ItemGroup
+      <CategorizedItemGroups
         title="Pegos"
         subtitle={`${boughtItems.length} item(ns) no carrinho`}
         items={boughtItems}
+        products={products}
         onToggle={onToggle}
         onRemove={onRemove}
         onQuantityChange={onQuantityChange}
@@ -944,10 +1002,11 @@ function ItemList({
   );
 }
 
-function ItemGroup({
+function CategorizedItemGroups({
   title,
   subtitle,
   items,
+  products,
   onToggle,
   onRemove,
   onQuantityChange,
@@ -956,12 +1015,15 @@ function ItemGroup({
   title: string;
   subtitle: string;
   items: ListItem[];
+  products: Product[];
   onToggle: (item: ListItem) => void;
   onRemove: (item: ListItem) => void;
   onQuantityChange: (item: ListItem, quantity: number) => void;
   done?: boolean;
 }) {
   if (items.length === 0) return null;
+
+  const grouped = groupItemsByCategory(items, products);
 
   return (
     <section className={`itemGroup ${done ? 'doneGroup' : ''}`}>
@@ -970,32 +1032,43 @@ function ItemGroup({
         <span>{subtitle}</span>
       </div>
 
-      <div className="items marketItems">
-        {items.map(item => (
-          <div className={'item marketItem ' + (item.checked ? 'done' : '')} key={item.id}>
-            <button className="check bigCheck" onClick={() => onToggle(item)}>
-              {item.checked ? <Check size={22} /> : <Circle size={22} />}
-            </button>
-
-            <div className="itemMain">
-              <strong>{item.product_name}</strong>
-              <span>{item.quantity} {item.unit} × {money(item.estimated_unit_price)} = {money(item.quantity * item.estimated_unit_price)}</span>
-
-              <div className="qtyEditor">
-                <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) - 1)}><Minus size={14} /></button>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={item.quantity}
-                  onChange={event => onQuantityChange(item, Number(event.target.value))}
-                  aria-label={`Quantidade de ${item.product_name}`}
-                />
-                <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) + 1)}><Plus size={14} /></button>
-              </div>
+      <div className="categoryGroups">
+        {grouped.map(([category, categoryItems]) => (
+          <div className="categoryGroup" key={`${title}-${category}`}>
+            <div className="categoryHeader">
+              <span><Tag size={14} /> {category}</span>
+              <small>{categoryItems.length} item(ns)</small>
             </div>
 
-            <button className="icon" onClick={() => onRemove(item)}><Trash2 size={18} /></button>
+            <div className="items marketItems">
+              {categoryItems.map(item => (
+                <div className={'item marketItem ' + (item.checked ? 'done' : '')} key={item.id}>
+                  <button className="check bigCheck" onClick={() => onToggle(item)}>
+                    {item.checked ? <Check size={22} /> : <Circle size={22} />}
+                  </button>
+
+                  <div className="itemMain">
+                    <strong>{item.product_name}</strong>
+                    <span>{item.quantity} {item.unit} × {money(item.estimated_unit_price)} = {money(item.quantity * item.estimated_unit_price)}</span>
+
+                    <div className="qtyEditor">
+                      <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) - 1)}><Minus size={14} /></button>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={item.quantity}
+                        onChange={event => onQuantityChange(item, Number(event.target.value))}
+                        aria-label={`Quantidade de ${item.product_name}`}
+                      />
+                      <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) + 1)}><Plus size={14} /></button>
+                    </div>
+                  </div>
+
+                  <button className="icon" onClick={() => onRemove(item)}><Trash2 size={18} /></button>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
@@ -1044,7 +1117,7 @@ function ProductPicker({
           <div className="productOption" key={product.id}>
             <div>
               <strong>{product.name}</strong>
-              <span>Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}</span>
+              <span><span className="categoryChip">{product.category || inferCategory(product.name)}</span> Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}</span>
             </div>
             <button onClick={() => onAdd(product)}><Plus size={16} /> Adicionar</button>
           </div>
