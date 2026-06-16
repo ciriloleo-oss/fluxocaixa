@@ -272,8 +272,76 @@ function App() {
 
   async function finishActiveList() {
     if (!activeList) return;
+
+    const totalItems = items.length;
+    const boughtItems = items.filter(item => item.checked).length;
+    const pendingItems = totalItems - boughtItems;
+
+    const message = pendingItems > 0
+      ? `Você marcou ${boughtItems} de ${totalItems} itens como pegos.\n\nAinda há ${pendingItems} item(ns) pendente(s). Finalizar mesmo assim?`
+      : `Todos os ${totalItems} itens foram marcados como pegos. Finalizar compra?`;
+
+    if (!confirm(message)) return;
+
     await supabase.from('shopping_lists').update({ status: 'done' }).eq('id', activeList.id);
     await loadAll();
+  }
+
+  async function reopenPurchase(list: ShoppingList) {
+    await supabase.from('shopping_lists').update({ status: 'open' }).eq('id', list.id);
+    await loadAll();
+    setActiveList({ ...list, status: 'open' });
+    setPage('compras');
+  }
+
+  async function duplicatePurchase(list: ShoppingList) {
+    const previousActive = activeList;
+    setActiveList(list);
+    const { data } = await supabase
+      .from('shopping_list_items')
+      .select('*')
+      .eq('list_id', list.id)
+      .order('created_at');
+
+    const market = getMarket(list);
+
+    const { data: newList, error } = await supabase
+      .from('shopping_lists')
+      .insert({
+        name: `${list.name} - nova`,
+        store_name: market,
+        market_name: market,
+        purchase_date: todayISO(),
+        status: 'open'
+      })
+      .select()
+      .single();
+
+    if (error || !newList) {
+      alert(error?.message || 'Não consegui duplicar a compra.');
+      if (previousActive) setActiveList(previousActive);
+      return;
+    }
+
+    const sourceItems = data || [];
+    const duplicatedItems = sourceItems.map(item => ({
+      list_id: newList.id,
+      product_id: item.product_id,
+      product_name: item.product_name,
+      quantity: item.quantity,
+      unit: item.unit,
+      estimated_unit_price: item.estimated_unit_price,
+      checked: false
+    }));
+
+    if (duplicatedItems.length > 0) {
+      await supabase.from('shopping_list_items').insert(duplicatedItems);
+      await supabase.rpc('recalculate_list_totals', { p_list_id: newList.id });
+    }
+
+    await loadAll();
+    setActiveList(newList);
+    setPage('compras');
   }
 
   async function addItem() {
@@ -596,7 +664,14 @@ function App() {
               <h2 className="sectionTitle">Concluídas</h2>
               <div className="purchaseCards compactCards">
                 {doneLists.slice(0, 8).map(list => (
-                  <PurchaseCard key={list.id} list={list} selected={activeList?.id === list.id} onClick={() => setActiveList(list)} />
+                  <PurchaseCard
+                    key={list.id}
+                    list={list}
+                    selected={activeList?.id === list.id}
+                    onClick={() => setActiveList(list)}
+                    onDuplicate={() => duplicatePurchase(list)}
+                    onReopen={() => reopenPurchase(list)}
+                  />
                 ))}
               </div>
             </section>
@@ -791,28 +866,41 @@ function PurchaseCard({
   selected,
   itemCount,
   checkedCount,
-  onClick
+  onClick,
+  onDuplicate,
+  onReopen
 }: {
   list: ShoppingList;
   selected: boolean;
   itemCount?: number;
   checkedCount?: number;
   onClick: () => void;
+  onDuplicate?: () => void;
+  onReopen?: () => void;
 }) {
   const progress = itemCount ? Math.round(((checkedCount || 0) / itemCount) * 100) : 0;
 
   return (
-    <button className={`purchaseCard ${selected ? 'selected' : ''}`} onClick={onClick}>
-      <div className="purchaseIcon"><ShoppingCart size={18} /></div>
-      <div>
-        <strong>{list.name}</strong>
-        <span><Store size={13} /> {getMarket(list)}</span>
-        <span>{list.purchase_date ? formatDate(list.purchase_date) : formatDate(list.created_at)} • {money(list.predicted_total)} previsto</span>
-        {itemCount !== undefined && (
-          <small>{checkedCount || 0} de {itemCount} itens • {progress}%</small>
-        )}
-      </div>
-    </button>
+    <div className={`purchaseCard ${selected ? 'selected' : ''}`}>
+      <button className="purchaseCardMain" onClick={onClick}>
+        <div className="purchaseIcon"><ShoppingCart size={18} /></div>
+        <div>
+          <strong>{list.name}</strong>
+          <span><Store size={13} /> {getMarket(list)}</span>
+          <span>{list.purchase_date ? formatDate(list.purchase_date) : formatDate(list.created_at)} • {money(list.predicted_total)} previsto</span>
+          {itemCount !== undefined && (
+            <small>{checkedCount || 0} de {itemCount} itens • {progress}%</small>
+          )}
+        </div>
+      </button>
+
+      {(onDuplicate || onReopen) && (
+        <div className="purchaseCardActions">
+          {onDuplicate && <button type="button" onClick={onDuplicate}><Copy size={14} /> Duplicar</button>}
+          {onReopen && <button type="button" onClick={onReopen}><RefreshCw size={14} /> Reabrir</button>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -827,40 +915,91 @@ function ItemList({
   onRemove: (item: ListItem) => void;
   onQuantityChange: (item: ListItem, quantity: number) => void;
 }) {
-  const sortedItems = [...items].sort((a, b) => Number(a.checked) - Number(b.checked));
+  const pendingItems = items.filter(item => !item.checked);
+  const boughtItems = items.filter(item => item.checked);
 
   return (
-    <div className="items marketItems">
-      {sortedItems.map(item => (
-        <div className={'item marketItem ' + (item.checked ? 'done' : '')} key={item.id}>
-          <button className="check bigCheck" onClick={() => onToggle(item)}>
-            {item.checked ? <Check size={22} /> : <Circle size={22} />}
-          </button>
+    <div className="marketList">
+      <ItemGroup
+        title="Pendentes"
+        subtitle={`${pendingItems.length} item(ns) para pegar`}
+        items={pendingItems}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onQuantityChange={onQuantityChange}
+      />
 
-          <div className="itemMain">
-            <strong>{item.product_name}</strong>
-            <span>{item.quantity} {item.unit} × {money(item.estimated_unit_price)} = {money(item.quantity * item.estimated_unit_price)}</span>
-
-            <div className="qtyEditor">
-              <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) - 1)}><Minus size={14} /></button>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={item.quantity}
-                onChange={event => onQuantityChange(item, Number(event.target.value))}
-                aria-label={`Quantidade de ${item.product_name}`}
-              />
-              <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) + 1)}><Plus size={14} /></button>
-            </div>
-          </div>
-
-          <button className="icon" onClick={() => onRemove(item)}><Trash2 size={18} /></button>
-        </div>
-      ))}
+      <ItemGroup
+        title="Pegos"
+        subtitle={`${boughtItems.length} item(ns) no carrinho`}
+        items={boughtItems}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onQuantityChange={onQuantityChange}
+        done
+      />
 
       {items.length === 0 && <p className="empty">Adicione produtos à compra.</p>}
     </div>
+  );
+}
+
+function ItemGroup({
+  title,
+  subtitle,
+  items,
+  onToggle,
+  onRemove,
+  onQuantityChange,
+  done = false
+}: {
+  title: string;
+  subtitle: string;
+  items: ListItem[];
+  onToggle: (item: ListItem) => void;
+  onRemove: (item: ListItem) => void;
+  onQuantityChange: (item: ListItem, quantity: number) => void;
+  done?: boolean;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className={`itemGroup ${done ? 'doneGroup' : ''}`}>
+      <div className="itemGroupHeader">
+        <h3>{title}</h3>
+        <span>{subtitle}</span>
+      </div>
+
+      <div className="items marketItems">
+        {items.map(item => (
+          <div className={'item marketItem ' + (item.checked ? 'done' : '')} key={item.id}>
+            <button className="check bigCheck" onClick={() => onToggle(item)}>
+              {item.checked ? <Check size={22} /> : <Circle size={22} />}
+            </button>
+
+            <div className="itemMain">
+              <strong>{item.product_name}</strong>
+              <span>{item.quantity} {item.unit} × {money(item.estimated_unit_price)} = {money(item.quantity * item.estimated_unit_price)}</span>
+
+              <div className="qtyEditor">
+                <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) - 1)}><Minus size={14} /></button>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={item.quantity}
+                  onChange={event => onQuantityChange(item, Number(event.target.value))}
+                  aria-label={`Quantidade de ${item.product_name}`}
+                />
+                <button type="button" onClick={() => onQuantityChange(item, Number(item.quantity) + 1)}><Plus size={14} /></button>
+              </div>
+            </div>
+
+            <button className="icon" onClick={() => onRemove(item)}><Trash2 size={18} /></button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -687,3 +687,92 @@ button:disabled {
     margin-top: 8px;
   }
 }
+
+.purchaseCard {
+  padding: 0;
+  overflow: hidden;
+}
+
+.purchaseCardMain {
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  text-align: left;
+  align-items: start;
+  border-radius: 0;
+  justify-content: initial;
+}
+
+.purchaseCardMain:hover {
+  background: transparent;
+  color: inherit;
+}
+
+.purchaseCardActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 10px;
+}
+
+.purchaseCardActions button {
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.marketList {
+  display: grid;
+  gap: 16px;
+}
+
+.itemGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.itemGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.itemGroupHeader h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.itemGroupHeader span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.doneGroup {
+  opacity: .82;
+}
+
+.doneGroup .itemGroupHeader h3::before {
+  content: "✓ ";
+  color: var(--accent);
+}
+
+@media (max-width: 860px) {
+  .purchaseCardActions {
+    grid-template-columns: 1fr;
+  }
+
+  .purchaseCardMain {
+    grid-template-columns: 40px 1fr;
+  }
+
+  .itemGroupHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
