@@ -191,6 +191,10 @@ function App() {
   const [newPurchaseDate, setNewPurchaseDate] = useState(todayISO());
 
   const [productSearch, setProductSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('Todas');
+  const [selectedMasterProductId, setSelectedMasterProductId] = useState('');
+  const [selectedDuplicateProductId, setSelectedDuplicateProductId] = useState('');
+  const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([]);
   const [purchaseProduct, setPurchaseProduct] = useState('');
   const [purchasePrice, setPurchasePrice] = useState(0);
   const [purchaseQty, setPurchaseQty] = useState(1);
@@ -203,6 +207,7 @@ function App() {
 
   useEffect(() => {
     loadAll();
+    loadDuplicateCandidates();
   }, []);
 
   useEffect(() => {
@@ -241,6 +246,18 @@ function App() {
       .order('created_at');
 
     setItems(data || []);
+  }
+
+
+  async function loadDuplicateCandidates() {
+    const { data, error } = await supabase
+      .from('product_duplicate_candidates')
+      .select('*')
+      .limit(30);
+
+    if (!error) {
+      setDuplicateCandidates(data || []);
+    }
   }
 
   async function loadCoupons() {
@@ -447,6 +464,67 @@ function App() {
     await refreshListTotals();
   }
 
+
+  async function updateProductCategory(product: Product, category: string) {
+    const { error } = await supabase
+      .from('products')
+      .update({ category })
+      .eq('id', product.id);
+
+    if (error) {
+      alert(`Erro ao salvar categoria: ${error.message}`);
+      return;
+    }
+
+    setProducts(current =>
+      current.map(item => item.id === product.id ? { ...item, category } : item)
+    );
+  }
+
+  async function autoCategorizeProduct(product: Product) {
+    await updateProductCategory(product, inferCategory(product.name));
+  }
+
+  async function autoCategorizeAllVisible() {
+    for (const product of filteredProducts) {
+      await updateProductCategory(product, inferCategory(product.name));
+    }
+  }
+
+
+  async function mergeSelectedProducts(masterId = selectedMasterProductId, duplicateId = selectedDuplicateProductId) {
+    if (!masterId || !duplicateId || masterId === duplicateId) {
+      alert('Selecione um produto principal e um produto duplicado diferente.');
+      return;
+    }
+
+    const master = products.find(product => product.id === masterId);
+    const duplicate = products.find(product => product.id === duplicateId);
+
+    if (!master || !duplicate) {
+      alert('Produto não encontrado.');
+      return;
+    }
+
+    const ok = confirm(`Unificar "${duplicate.name}" dentro de "${master.name}"?\n\nO histórico e as listas passarão a usar o produto principal.`);
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('merge_products', {
+      p_master_product_id: masterId,
+      p_duplicate_product_ids: [duplicateId]
+    });
+
+    if (error) {
+      alert(`Erro ao unificar produtos: ${error.message}`);
+      return;
+    }
+
+    setSelectedDuplicateProductId('');
+    await loadAll();
+    await loadDuplicateCandidates();
+    alert('Produtos unificados com sucesso.');
+  }
+
   async function toggleItem(item: ListItem) {
     await supabase
       .from('shopping_list_items')
@@ -576,12 +654,24 @@ function App() {
   const checkedCount = items.filter(item => item.checked).length;
   const progressPct = items.length ? Math.round((checkedCount / items.length) * 100) : 0;
 
+  const availableCategories = useMemo(() => {
+    const categories = new Set<string>();
+
+    for (const product of products) {
+      categories.add(product.category || inferCategory(product.name));
+    }
+
+    return ['Todas', ...CATEGORY_ORDER.filter(category => categories.has(category)), ...Array.from(categories).filter(category => !CATEGORY_ORDER.includes(category)).sort()];
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
     const query = normalizeName(productSearch);
+
     return products
       .filter(product => !query || product.name.includes(query))
-      .slice(0, 100);
-  }, [products, productSearch]);
+      .filter(product => categoryFilter === 'Todas' || (product.category || inferCategory(product.name)) === categoryFilter)
+      .slice(0, 120);
+  }, [products, productSearch, categoryFilter]);
 
   const openLists = lists.filter(list => list.status !== 'done');
   const doneLists = lists.filter(list => list.status === 'done');
@@ -779,10 +869,76 @@ function App() {
                   <h2>Catálogo de produtos</h2>
                   <p className="muted">Produtos importados de cupons e lançamentos manuais.</p>
                 </div>
-                <button onClick={loadAll}><RefreshCw size={18} /> Atualizar</button>
+                <div className="actions">
+                  <button onClick={loadAll}><RefreshCw size={18} /> Atualizar</button>
+                  <button onClick={autoCategorizeAllVisible}>Recategorizar visíveis</button>
+                </div>
               </div>
 
-              <ProductPicker products={filteredProducts} search={productSearch} onSearch={setProductSearch} onAdd={addProductFromHistory} />
+              <ProductPicker
+                products={filteredProducts}
+                search={productSearch}
+                onSearch={setProductSearch}
+                onAdd={addProductFromHistory}
+                categoryFilter={categoryFilter}
+                onCategoryFilter={setCategoryFilter}
+                availableCategories={availableCategories}
+                onUpdateCategory={updateProductCategory}
+                onAutoCategorize={autoCategorizeProduct}
+                showCategoryTools
+              />
+            </section>
+
+            <section className="card wide">
+              <div className="cardTop">
+                <div>
+                  <h2>Unificar produtos duplicados</h2>
+                  <p className="muted">Escolha o produto principal e o nome duplicado que deve virar alias.</p>
+                </div>
+                <button onClick={loadDuplicateCandidates}><RefreshCw size={18} /> Buscar candidatos</button>
+              </div>
+
+              <div className="mergeBox">
+                <label>
+                  Produto principal
+                  <select value={selectedMasterProductId} onChange={event => setSelectedMasterProductId(event.target.value)}>
+                    <option value="">Selecione o produto principal</option>
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>{product.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Produto duplicado
+                  <select value={selectedDuplicateProductId} onChange={event => setSelectedDuplicateProductId(event.target.value)}>
+                    <option value="">Selecione o duplicado</option>
+                    {products.filter(product => product.id !== selectedMasterProductId).map(product => (
+                      <option key={product.id} value={product.id}>{product.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <button onClick={() => mergeSelectedProducts()}>Unificar produtos</button>
+              </div>
+
+              <h3>Candidatos prováveis</h3>
+              <div className="duplicateCandidates">
+                {duplicateCandidates.map(candidate => (
+                  <div className="duplicateCandidate" key={`${candidate.product_a_id}-${candidate.product_b_id}`}>
+                    <div>
+                      <strong>{candidate.product_a_name}</strong>
+                      <span>{candidate.product_b_name}</span>
+                      <small>Similaridade: {Math.round(Number(candidate.score || 0) * 100)}%</small>
+                    </div>
+                    <div className="duplicateActions">
+                      <button onClick={() => mergeSelectedProducts(candidate.product_a_id, candidate.product_b_id)}>A é principal</button>
+                      <button onClick={() => mergeSelectedProducts(candidate.product_b_id, candidate.product_a_id)}>B é principal</button>
+                    </div>
+                  </div>
+                ))}
+                {duplicateCandidates.length === 0 && <p className="empty">Nenhum candidato encontrado ainda.</p>}
+              </div>
             </section>
 
             <section className="card">
@@ -1094,12 +1250,24 @@ function ProductPicker({
   products,
   search,
   onSearch,
-  onAdd
+  onAdd,
+  categoryFilter = 'Todas',
+  onCategoryFilter,
+  availableCategories = [],
+  onUpdateCategory,
+  onAutoCategorize,
+  showCategoryTools = false
 }: {
   products: Product[];
   search: string;
   onSearch: (value: string) => void;
   onAdd: (product: Product) => void;
+  categoryFilter?: string;
+  onCategoryFilter?: (value: string) => void;
+  availableCategories?: string[];
+  onUpdateCategory?: (product: Product, category: string) => void;
+  onAutoCategorize?: (product: Product) => void;
+  showCategoryTools?: boolean;
 }) {
   return (
     <>
@@ -1112,16 +1280,52 @@ function ProductPicker({
         />
       </div>
 
+      {showCategoryTools && onCategoryFilter && (
+        <div className="categoryToolbar">
+          <label>
+            Filtrar categoria
+            <select value={categoryFilter} onChange={event => onCategoryFilter(event.target.value)}>
+              {availableCategories.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
       <div className="productPicker">
-        {products.map(product => (
-          <div className="productOption" key={product.id}>
-            <div>
-              <strong>{product.name}</strong>
-              <span><span className="categoryChip">{product.category || inferCategory(product.name)}</span> Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}</span>
+        {products.map(product => {
+          const category = product.category || inferCategory(product.name);
+
+          return (
+            <div className="productOption" key={product.id}>
+              <div>
+                <strong>{product.name}</strong>
+                <span>
+                  <span className="categoryChip">{category}</span>
+                  Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}
+                </span>
+
+                {showCategoryTools && onUpdateCategory && (
+                  <div className="categoryEditor">
+                    <select value={category} onChange={event => onUpdateCategory(product, event.target.value)}>
+                      {CATEGORY_ORDER.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                    {onAutoCategorize && (
+                      <button type="button" onClick={() => onAutoCategorize(product)}>
+                        Auto
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button onClick={() => onAdd(product)}><Plus size={16} /> Adicionar</button>
             </div>
-            <button onClick={() => onAdd(product)}><Plus size={16} /> Adicionar</button>
-          </div>
-        ))}
+          );
+        })}
 
         {products.length === 0 && <p className="empty">Nenhum produto encontrado.</p>}
       </div>

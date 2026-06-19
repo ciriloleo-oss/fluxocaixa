@@ -822,3 +822,135 @@ button:disabled {
   font-size: 11px;
   font-weight: 900;
 }
+
+
+.categoryToolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.categoryToolbar label {
+  width: min(360px, 100%);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.categoryToolbar select {
+  margin-top: 6px;
+}
+
+.categoryEditor {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) auto;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 340px;
+}
+
+.categoryEditor select {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 14px;
+  font-size: 13px;
+}
+
+.categoryEditor button {
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .categoryToolbar {
+    flex-direction: column;
+  }
+
+  .categoryEditor {
+    grid-template-columns: 1fr;
+    max-width: none;
+  }
+}
+
+
+.mergeBox {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.mergeBox label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.mergeBox select {
+  margin-top: 6px;
+}
+
+.duplicateCandidates {
+  display: grid;
+  gap: 10px;
+}
+
+.duplicateCandidate {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 13px;
+}
+
+.duplicateCandidate strong,
+.duplicateCandidate span,
+.duplicateCandidate small {
+  display: block;
+}
+
+.duplicateCandidate span {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.duplicateCandidate small {
+  color: var(--accent-dark);
+  font-weight: 900;
+  margin-top: 6px;
+}
+
+.duplicateActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.duplicateActions button {
+  padding: 10px 12px;
+  border-radius: 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .mergeBox {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicateCandidate {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicateActions button {
+    width: 100%;
+  }
+}
