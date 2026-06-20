@@ -954,3 +954,37 @@ button:disabled {
     width: 100%;
   }
 }
+
+
+.marketComparisonBox{background:#fbfdf9;border:1px solid var(--line);border-radius:22px;padding:14px;margin-bottom:16px}
+.marketOptions{display:grid;gap:8px}
+.marketOption{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px}
+.marketOption.best{border-color:var(--accent);background:var(--soft)}
+.marketOption span{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+.marketOption b{white-space:nowrap;color:var(--accent-dark)}
+.marketPriceList{display:grid;gap:6px;margin-top:10px;max-width:380px}
+.marketPriceRow{display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);background:#fbfdf9;border-radius:12px;padding:7px 9px;font-size:12px}
+.marketPriceRow span{color:var(--muted);margin:0}
+.marketPriceRow strong{white-space:nowrap}
+.analyticsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.analyticsCard{background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px}
+.analyticsCard span{color:var(--muted);font-size:12px;font-weight:900;text-transform:uppercase}
+.analyticsCard strong{display:block;font-size:24px;margin:6px 0}
+.analyticsCard small{color:var(--muted)}
+@media(max-width:860px){.marketOption{align-items:flex-start;flex-direction:column}.analyticsGrid{grid-template-columns:1fr}}
+
+
+.priceComparisonList{display:grid;gap:12px}
+.priceComparisonCard{background:#fff;border:1px solid var(--line);border-radius:22px;padding:14px}
+.priceComparisonHeader{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}
+.priceComparisonHeader strong{display:block;font-size:16px}
+.priceComparisonHeader span{display:block;color:var(--muted);font-size:13px;margin-top:4px}
+.confidenceBadge{border-radius:999px;padding:7px 10px;font-size:12px;font-weight:900;white-space:nowrap;background:#fff7db;color:#7a4d00}
+.confidenceBadge.high{background:var(--soft);color:var(--accent-dark)}
+.priceRows{display:grid;gap:7px}
+.priceRow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;background:#fbfdf9;border:1px solid var(--line);border-radius:14px;padding:10px}
+.priceRow.best{border-color:var(--accent);background:var(--soft)}
+.priceRow span{font-weight:800}
+.priceRow strong{color:var(--accent-dark);white-space:nowrap}
+.priceRow small{color:var(--muted);font-size:12px;white-space:nowrap}
+@media(max-width:860px){.priceComparisonHeader{flex-direction:column}.priceRow{grid-template-columns:1fr}.confidenceBadge{width:fit-content}}

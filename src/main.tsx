@@ -44,6 +44,7 @@ type ShoppingList = {
   purchase_date?: string | null;
   predicted_total: number;
   actual_total: number;
+  is_archived?: boolean | null;
   created_at?: string;
 };
 
@@ -210,7 +211,7 @@ function getMarket(list?: ShoppingList | null) {
 }
 
 function App() {
-  const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'analises' | 'cupons'>('inicio');
+  const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'ondeComprar' | 'analises' | 'cupons'>('inicio');
   const [products, setProducts] = useState<Product[]>([]);
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [activeList, setActiveList] = useState<ShoppingList | null>(null);
@@ -233,6 +234,7 @@ function App() {
   const [newPurchaseDate, setNewPurchaseDate] = useState(todayISO());
 
   const [productSearch, setProductSearch] = useState('');
+  const [priceSearch, setPriceSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   const [selectedMasterProductId, setSelectedMasterProductId] = useState('');
   const [selectedDuplicateProductId, setSelectedDuplicateProductId] = useState('');
@@ -575,6 +577,28 @@ function App() {
     alert('Produtos unificados com sucesso.');
   }
 
+  async function archivePurchase(list: ShoppingList) {
+    const ok = confirm(`Ocultar a compra "${list.name}" da tela de Compras?\n\nEla continuará no histórico e nas análises.`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('shopping_lists')
+      .update({ is_archived: true })
+      .eq('id', list.id);
+
+    if (error) {
+      alert(`Erro ao ocultar compra: ${error.message}`);
+      return;
+    }
+
+    if (activeList?.id === list.id) {
+      setActiveList(null);
+      setItems([]);
+    }
+
+    await loadAll();
+  }
+
   async function toggleItem(item: ListItem) {
     await supabase
       .from('shopping_list_items')
@@ -723,8 +747,9 @@ function App() {
       .slice(0, 120);
   }, [products, productSearch, categoryFilter]);
 
-  const openLists = lists.filter(list => list.status !== 'done');
-  const doneLists = lists.filter(list => list.status === 'done');
+  const visibleLists = lists.filter(list => !list.is_archived);
+  const openLists = visibleLists.filter(list => list.status !== 'done');
+  const doneLists = visibleLists.filter(list => list.status === 'done');
   const importedCoupons = coupons.filter(coupon => coupon.status === 'imported');
   const pendingCoupons = coupons.filter(coupon => coupon.status !== 'imported');
   const totalPurchased = purchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
@@ -784,6 +809,58 @@ function App() {
     return map;
   }, [marketPrices]);
 
+  const comparableProducts = useMemo(() => {
+    const query = normalizeName(priceSearch);
+
+    return Array.from(productPriceGroups.entries())
+      .map(([productId, prices]) => {
+        const product = products.find(item => item.id === productId);
+        const validPrices = prices.filter(price => Number(price.last_price || 0) > 0);
+
+        if (!product || validPrices.length < 2) return null;
+        if (query && !product.name.includes(query)) return null;
+
+        const sorted = [...validPrices].sort((a, b) => Number(a.last_price || 0) - Number(b.last_price || 0));
+        const best = sorted[0];
+        const worst = sorted[sorted.length - 1];
+        const saving = Number(worst.last_price || 0) - Number(best.last_price || 0);
+        const savingPct = Number(worst.last_price || 0) > 0 ? (saving / Number(worst.last_price || 0)) * 100 : 0;
+        const confidence = sorted.reduce((sum, price) => sum + Number(price.price_count || 0), 0);
+
+        return {
+          product,
+          prices: sorted,
+          best,
+          worst,
+          saving,
+          savingPct,
+          confidence
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.savingPct - a.savingPct)
+      .slice(0, 80) as Array<{
+        product: Product;
+        prices: ProductMarketPrice[];
+        best: ProductMarketPrice;
+        worst: ProductMarketPrice;
+        saving: number;
+        savingPct: number;
+        confidence: number;
+      }>;
+  }, [productPriceGroups, products, priceSearch]);
+
+  const totalComparableSaving = comparableProducts.reduce((sum, item) => sum + Number(item.saving || 0), 0);
+  const leadingMarket = useMemo(() => {
+    const wins = new Map<string, number>();
+
+    for (const item of comparableProducts) {
+      wins.set(item.best.market_name, (wins.get(item.best.market_name) || 0) + 1);
+    }
+
+    return Array.from(wins.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || '-';
+  }, [comparableProducts]);
+
   const risingProducts = useMemo(() => {
     return products
       .filter(product => product.last_price && product.avg_price && product.last_price > product.avg_price)
@@ -809,6 +886,7 @@ function App() {
         <button className={page === 'inicio' ? 'active' : ''} onClick={() => setPage('inicio')}><Home size={18} /> Início</button>
         <button className={page === 'compras' ? 'active' : ''} onClick={() => setPage('compras')}><ListChecks size={18} /> Compras</button>
         <button className={page === 'produtos' ? 'active' : ''} onClick={() => setPage('produtos')}><PackageSearch size={18} /> Produtos</button>
+        <button className={page === 'ondeComprar' ? 'active' : ''} onClick={() => setPage('ondeComprar')}><Store size={18} /> Onde Comprar</button>
         <button className={page === 'analises' ? 'active' : ''} onClick={() => setPage('analises')}><BarChart3 size={18} /> Análises</button>
         <button className={page === 'cupons' ? 'active' : ''} onClick={() => { setPage('cupons'); loadCoupons(); }}><FileSearch size={18} /> Cupons</button>
       </aside>
@@ -841,6 +919,7 @@ function App() {
             <Metric label="Cupons importados" value={String(importedCoupons.length)} note={`${pendingCoupons.length} pendentes`} />
             <Metric label="Gasto registrado" value={money(totalPurchased)} note="Baseado no histórico" />
             <Metric label="Melhor mercado da lista" value={bestActiveMarket?.market_name || '-'} note={bestActiveMarket ? `${money(bestActiveMarket.estimated_total)} • ${bestActiveMarket.coverage_pct}% coberto` : 'Sem dados suficientes'} />
+            <Metric label="Produtos comparáveis" value={String(comparableProducts.length)} note={`Economia potencial ${money(totalComparableSaving)}`} />
 
             <section className="card wide">
               <h2>Adicionar produtos recorrentes</h2>
@@ -894,6 +973,7 @@ function App() {
                     onClick={() => setActiveList(list)}
                     onDuplicate={() => duplicatePurchase(list)}
                     onReopen={() => reopenPurchase(list)}
+                    onArchive={() => archivePurchase(list)}
                   />
                 ))}
               </div>
@@ -1058,6 +1138,65 @@ function App() {
           </section>
         )}
 
+        {page === 'ondeComprar' && (
+          <section className="pageGrid">
+            <Metric label="Produtos comparáveis" value={String(comparableProducts.length)} note="Com preço em mais de um mercado" />
+            <Metric label="Economia potencial" value={money(totalComparableSaving)} note="Diferença entre pior e melhor preço" />
+            <Metric label="Mercado mais competitivo" value={leadingMarket} note="Mais vezes com menor preço" />
+
+            <section className="card wide">
+              <div className="cardTop">
+                <div>
+                  <h2>Comparação de preços</h2>
+                  <p className="muted">Produtos com preço registrado em mais de um mercado.</p>
+                </div>
+                <button onClick={loadAll}><RefreshCw size={18} /> Atualizar</button>
+              </div>
+
+              <div className="searchBox">
+                <Search size={18} />
+                <input
+                  value={priceSearch}
+                  onChange={event => setPriceSearch(event.target.value)}
+                  placeholder="Buscar produto para comparar..."
+                />
+              </div>
+
+              <div className="priceComparisonList">
+                {comparableProducts.map(item => (
+                  <div className="priceComparisonCard" key={item.product.id}>
+                    <div className="priceComparisonHeader">
+                      <div>
+                        <strong>{item.product.name}</strong>
+                        <span>
+                          Melhor: {item.best.market_name} • Economia até {money(item.saving)} ({item.savingPct.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <div className={`confidenceBadge ${item.confidence >= 5 ? 'high' : 'low'}`}>
+                        {item.confidence >= 5 ? 'Alta confiança' : 'Baixa confiança'}
+                      </div>
+                    </div>
+
+                    <div className="priceRows">
+                      {item.prices.map((price, index) => (
+                        <div className={`priceRow ${index === 0 ? 'best' : ''}`} key={`${item.product.id}-${price.market_name}`}>
+                          <span>{index === 0 ? '🥇 ' : ''}{price.market_name}</span>
+                          <strong>{money(price.last_price)}</strong>
+                          <small>{price.price_count || 0} registro(s)</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {comparableProducts.length === 0 && (
+                  <p className="empty">Ainda não há produtos com preço em mais de um mercado. Importe mais cupons para comparar.</p>
+                )}
+              </div>
+            </section>
+          </section>
+        )}
+
         {page === 'analises' && (
           <section className="pageGrid">
             <Metric label="Total gasto registrado" value={money(totalPurchased)} note={`${purchases.length} itens comprados`} />
@@ -1147,6 +1286,7 @@ function pageTitle(page: string) {
     inicio: 'Início',
     compras: 'Compras',
     produtos: 'Produtos',
+    ondeComprar: 'Onde Comprar',
     analises: 'Análises',
     cupons: 'Cupons NFC-e'
   };
@@ -1189,7 +1329,8 @@ function PurchaseCard({
   checkedCount,
   onClick,
   onDuplicate,
-  onReopen
+  onReopen,
+  onArchive
 }: {
   list: ShoppingList;
   selected: boolean;
@@ -1198,6 +1339,7 @@ function PurchaseCard({
   onClick: () => void;
   onDuplicate?: () => void;
   onReopen?: () => void;
+  onArchive?: () => void;
 }) {
   const progress = itemCount ? Math.round(((checkedCount || 0) / itemCount) * 100) : 0;
 
@@ -1215,10 +1357,11 @@ function PurchaseCard({
         </div>
       </button>
 
-      {(onDuplicate || onReopen) && (
+      {(onDuplicate || onReopen || onArchive) && (
         <div className="purchaseCardActions">
           {onDuplicate && <button type="button" onClick={onDuplicate}><Copy size={14} /> Duplicar</button>}
           {onReopen && <button type="button" onClick={onReopen}><RefreshCw size={14} /> Reabrir</button>}
+          {onArchive && <button type="button" onClick={onArchive}><Trash2 size={14} /> Ocultar</button>}
         </div>
       )}
     </div>
