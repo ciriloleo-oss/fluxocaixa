@@ -71,6 +71,44 @@ type CouponImport = {
   created_at: string;
 };
 
+
+type ProductMarketPrice = {
+  product_id: string;
+  product_name: string;
+  market_name: string;
+  unit: string | null;
+  last_price: number | null;
+  avg_price: number | null;
+  price_count: number | null;
+  last_purchase_date: string | null;
+};
+
+type ListMarketComparison = {
+  list_id: string;
+  list_name: string;
+  market_name: string;
+  estimated_total: number;
+  item_count: number;
+  priced_item_count: number;
+  coverage_pct: number;
+};
+
+type MonthlySummary = {
+  month: string;
+  total_spent: number;
+  item_count: number;
+  product_count: number;
+  market_count: number;
+};
+
+type MarketSummary = {
+  market_name: string;
+  total_spent: number;
+  item_count: number;
+  product_count: number;
+  last_purchase_date: string | null;
+};
+
 type PurchaseItem = {
   id: string;
   product_id: string | null;
@@ -179,6 +217,10 @@ function App() {
   const [items, setItems] = useState<ListItem[]>([]);
   const [coupons, setCoupons] = useState<CouponImport[]>([]);
   const [purchases, setPurchases] = useState<PurchaseItem[]>([]);
+  const [marketPrices, setMarketPrices] = useState<ProductMarketPrice[]>([]);
+  const [listMarketComparison, setListMarketComparison] = useState<ListMarketComparison[]>([]);
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([]);
+  const [marketSummary, setMarketSummary] = useState<MarketSummary[]>([]);
 
   const [productName, setProductName] = useState('');
   const [qty, setQty] = useState(1);
@@ -219,16 +261,24 @@ function App() {
   }, [activeList?.id]);
 
   async function loadAll() {
-    const [productsResponse, listsResponse, couponsResponse, purchasesResponse] = await Promise.all([
+    const [productsResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse] = await Promise.all([
       supabase.from('product_price_summary').select('*').order('name'),
       supabase.from('shopping_lists').select('*').order('created_at', { ascending: false }),
       supabase.from('coupon_imports').select('*').order('created_at', { ascending: false }),
-      supabase.from('purchase_items').select('*').order('purchase_date', { ascending: false }).limit(500)
+      supabase.from('purchase_items').select('*').order('purchase_date', { ascending: false }).limit(500),
+      supabase.from('product_market_prices').select('*').order('product_name'),
+      supabase.from('shopping_list_market_comparison').select('*'),
+      supabase.from('monthly_spending_summary').select('*').limit(12),
+      supabase.from('market_spending_summary').select('*').limit(12)
     ]);
 
     if (!productsResponse.error) setProducts(productsResponse.data || []);
     if (!couponsResponse.error) setCoupons(couponsResponse.data || []);
     if (!purchasesResponse.error) setPurchases(purchasesResponse.data || []);
+    if (!marketPricesResponse.error) setMarketPrices(marketPricesResponse.data || []);
+    if (!listMarketResponse.error) setListMarketComparison(listMarketResponse.data || []);
+    if (!monthlyResponse.error) setMonthlySummary(monthlyResponse.data || []);
+    if (!marketSummaryResponse.error) setMarketSummary(marketSummaryResponse.data || []);
 
     if (!listsResponse.error) {
       const loadedLists = listsResponse.data || [];
@@ -706,6 +756,34 @@ function App() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 8);
   }, [purchases]);
 
+
+  const activeListMarketOptions = useMemo(() => {
+    if (!activeList) return [];
+
+    return listMarketComparison
+      .filter(item => item.list_id === activeList.id)
+      .sort((a, b) => Number(a.estimated_total || 0) - Number(b.estimated_total || 0))
+      .slice(0, 6);
+  }, [listMarketComparison, activeList?.id]);
+
+  const bestActiveMarket = activeListMarketOptions[0] || null;
+
+  const productPriceGroups = useMemo(() => {
+    const map = new Map<string, ProductMarketPrice[]>();
+
+    for (const price of marketPrices) {
+      const current = map.get(price.product_id) || [];
+      current.push(price);
+      map.set(price.product_id, current);
+    }
+
+    for (const [productId, prices] of map.entries()) {
+      map.set(productId, prices.sort((a, b) => Number(a.last_price || 0) - Number(b.last_price || 0)));
+    }
+
+    return map;
+  }, [marketPrices]);
+
   const risingProducts = useMemo(() => {
     return products
       .filter(product => product.last_price && product.avg_price && product.last_price > product.avg_price)
@@ -762,6 +840,7 @@ function App() {
             <Metric label="Produtos conhecidos" value={String(products.length)} note="Itens no histórico" />
             <Metric label="Cupons importados" value={String(importedCoupons.length)} note={`${pendingCoupons.length} pendentes`} />
             <Metric label="Gasto registrado" value={money(totalPurchased)} note="Baseado no histórico" />
+            <Metric label="Melhor mercado da lista" value={bestActiveMarket?.market_name || '-'} note={bestActiveMarket ? `${money(bestActiveMarket.estimated_total)} • ${bestActiveMarket.coverage_pct}% coberto` : 'Sem dados suficientes'} />
 
             <section className="card wide">
               <h2>Adicionar produtos recorrentes</h2>
@@ -835,6 +914,23 @@ function App() {
               <ProgressBar value={progressPct} label={`${checkedCount} de ${items.length} itens pegos`} />
               <Summary predicted={predictedTotal} checked={checkedTotal} />
 
+              {activeListMarketOptions.length > 0 && (
+                <div className="marketComparisonBox">
+                  <h3>Melhor mercado para esta compra</h3>
+                  <div className="marketOptions">
+                    {activeListMarketOptions.map((option, index) => (
+                      <div className={`marketOption ${index === 0 ? 'best' : ''}`} key={option.market_name}>
+                        <div>
+                          <strong>{index === 0 ? '🏆 ' : ''}{option.market_name}</strong>
+                          <span>{option.priced_item_count} de {option.item_count} itens com preço conhecido • {option.coverage_pct}%</span>
+                        </div>
+                        <b>{money(option.estimated_total)}</b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="manualAdd">
                 <h3>Adicionar item manual</h3>
                 <input list="products" value={productName} onChange={event => setProductName(event.target.value)} placeholder="Produto" />
@@ -886,6 +982,7 @@ function App() {
                 onUpdateCategory={updateProductCategory}
                 onAutoCategorize={autoCategorizeProduct}
                 showCategoryTools
+                marketPricesByProduct={productPriceGroups}
               />
             </section>
 
@@ -966,6 +1063,20 @@ function App() {
             <Metric label="Total gasto registrado" value={money(totalPurchased)} note={`${purchases.length} itens comprados`} />
             <Metric label="Produtos monitorados" value={String(products.length)} note="Com preço médio/último preço" />
             <Metric label="Compras criadas" value={String(lists.length)} note={`${openLists.length} abertas`} />
+
+            <section className="card wide">
+              <h2>Gasto mensal</h2>
+              <div className="analyticsGrid">
+                {monthlySummary.slice(0, 6).map(month => (
+                  <div className="analyticsCard" key={month.month}>
+                    <span>{new Date(`${month.month}T00:00:00`).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}</span>
+                    <strong>{money(month.total_spent)}</strong>
+                    <small>{month.item_count} itens • {month.market_count} mercado(s)</small>
+                  </div>
+                ))}
+                {monthlySummary.length === 0 && <p className="empty">Importe cupons para gerar o histórico mensal.</p>}
+              </div>
+            </section>
 
             <section className="card">
               <h2>Gastos por supermercado</h2>
@@ -1256,7 +1367,8 @@ function ProductPicker({
   availableCategories = [],
   onUpdateCategory,
   onAutoCategorize,
-  showCategoryTools = false
+  showCategoryTools = false,
+  marketPricesByProduct
 }: {
   products: Product[];
   search: string;
@@ -1268,6 +1380,7 @@ function ProductPicker({
   onUpdateCategory?: (product: Product, category: string) => void;
   onAutoCategorize?: (product: Product) => void;
   showCategoryTools?: boolean;
+  marketPricesByProduct?: Map<string, ProductMarketPrice[]>;
 }) {
   return (
     <>
@@ -1305,6 +1418,17 @@ function ProductPicker({
                   <span className="categoryChip">{category}</span>
                   Último: {money(product.last_price)} • Média: {money(product.avg_price)} • {product.default_unit || 'un'}
                 </span>
+
+                {showCategoryTools && marketPricesByProduct?.get(product.id)?.length ? (
+                  <div className="marketPriceList">
+                    {marketPricesByProduct.get(product.id)!.slice(0, 4).map(price => (
+                      <div className="marketPriceRow" key={`${product.id}-${price.market_name}`}>
+                        <span>{price.market_name}</span>
+                        <strong>{money(price.last_price)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
 
                 {showCategoryTools && onUpdateCategory && (
                   <div className="categoryEditor">
