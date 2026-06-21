@@ -18,6 +18,9 @@ type ParsedItem = {
   unit: string;
   unitPrice: number;
   totalPrice: number;
+  grossUnitPrice: number;
+  discountAmount: number;
+  netUnitPrice: number;
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -36,6 +39,18 @@ function extractAccessKey(qrUrl: string) {
   const decoded = decodeURIComponent(qrUrl);
   const match = decoded.match(/[?&]p=(\d{44})/i) || decoded.match(/(\d{44})/);
   return match?.[1] || null;
+}
+
+function extractIssuerCnpj(qrUrl: string) {
+  const accessKey = extractAccessKey(qrUrl);
+  const issuerCnpj = extractIssuerCnpj(qrUrl);
+
+  if (accessKey && accessKey.length === 44) {
+    return accessKey.slice(6, 20);
+  }
+
+  const digits = qrUrl.replace(/\D/g, '');
+  return digits.length >= 20 ? digits.slice(6, 20) : null;
 }
 
 function decodeHtml(value: string) {
@@ -70,11 +85,106 @@ function toNumber(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function calculateNetPrices(quantity: number, unitPrice: number, totalPrice: number, discountAmount = 0) {
+  const safeQuantity = quantity || 1;
+  const grossTotal = totalPrice || unitPrice * safeQuantity;
+  const safeDiscount = Math.max(0, discountAmount || 0);
+  const netTotal = Math.max(0, grossTotal - safeDiscount);
+  const netUnitPrice = safeQuantity ? netTotal / safeQuantity : netTotal;
+
+  return {
+    grossUnitPrice: unitPrice || (safeQuantity ? grossTotal / safeQuantity : grossTotal),
+    discountAmount: safeDiscount,
+    netUnitPrice: netUnitPrice || unitPrice || 0,
+    netTotalPrice: netTotal || grossTotal,
+  };
+}
+
+function extractDiscountAmount(text: string) {
+  const patterns = [
+    /(?:Desconto|Desc\.?|Valor\s+Desconto)\s*:?\s*R?\$?\s*([\d.,]+)/i,
+    /(?:Valor\s+do\s+Desconto)\s*:?\s*R?\$?\s*([\d.,]+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = toNumber(match?.[1]);
+    if (value > 0) return value;
+  }
+
+  return 0;
+}
+
 function normalizeProductName(name: string) {
   return stripTags(name)
     .replace(/\s+/g, ' ')
     .trim()
     .toUpperCase();
+}
+
+function cleanStoreName(value: string | null | undefined) {
+  if (!value) return null;
+
+  const cleaned = stripTags(value)
+    .replace(/\s+/g, ' ')
+    .replace(/\b(CNPJ|CPF|IE|IM|Endere[cç]o|Endereco|Telefone|Fone|NFC-e|DANFE|Documento Auxiliar).*$/i, '')
+    .trim()
+    .toUpperCase();
+
+  return cleaned.length >= 3 ? cleaned : null;
+}
+
+function extractStoreName(html: string) {
+  const decoded = decodeHtml(html);
+  const text = stripTags(decoded);
+
+  const htmlPatterns = [
+    /<div[^>]+id=["']conteudo["'][\s\S]*?<div[^>]+class=["'][^"']*txtCenter[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class=["'][^"']*txtCenter[^"']*["'][^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>/i,
+    /<h4[^>]*>([\s\S]*?)<\/h4>/i,
+    /<h3[^>]*>([\s\S]*?)<\/h3>/i,
+    /<title[^>]*>([\s\S]*?)<\/title>/i
+  ];
+
+  for (const pattern of htmlPatterns) {
+    const match = decoded.match(pattern);
+    const storeName = cleanStoreName(match?.[1]);
+    if (storeName && !/NFC|NOTA FISCAL|CUPOM|SEFAZ|SECRETARIA/.test(storeName)) {
+      return storeName;
+    }
+  }
+
+  const textPatterns = [
+    /Raz[aã]o\s+Social[:\s]+(.+?)(?:CNPJ|CPF|IE|Inscri[cç][aã]o|Endere[cç]o|Endereco)/i,
+    /Nome\s+Empresarial[:\s]+(.+?)(?:CNPJ|CPF|IE|Inscri[cç][aã]o|Endere[cç]o|Endereco)/i,
+    /Emitente[:\s]+(.+?)(?:CNPJ|CPF|IE|Inscri[cç][aã]o|Endere[cç]o|Endereco)/i,
+    /Dados\s+do\s+Emitente\s+(.+?)(?:CNPJ|CPF|IE|Inscri[cç][aã]o|Endere[cç]o|Endereco)/i
+  ];
+
+  for (const pattern of textPatterns) {
+    const match = text.match(pattern);
+    const storeName = cleanStoreName(match?.[1]);
+    if (storeName && !/NFC|NOTA FISCAL|CUPOM|SEFAZ|SECRETARIA/.test(storeName)) {
+      return storeName;
+    }
+  }
+
+  const cnpjIndex = text.search(/CNPJ/i);
+  if (cnpjIndex > 0) {
+    const beforeCnpj = text.slice(Math.max(0, cnpjIndex - 220), cnpjIndex);
+    const candidates = beforeCnpj
+      .split(/\s{2,}| - | \| /)
+      .map(cleanStoreName)
+      .filter(Boolean) as string[];
+
+    const likely = candidates
+      .reverse()
+      .find(candidate => candidate.length >= 4 && !/NFC|NOTA FISCAL|CUPOM|SEFAZ|SECRETARIA|DANFE/.test(candidate));
+
+    if (likely) return likely;
+  }
+
+  return null;
 }
 
 function inferCategory(productName: string) {
@@ -109,12 +219,21 @@ function parseItemsFromText(text: string): ParsedItem[] {
     const name = normalizeProductName(match[1]);
     if (!name || name.length < 2) continue;
 
+    const quantity = toNumber(match[2]) || 1;
+    const unitPrice = toNumber(match[4]);
+    const totalPrice = toNumber(match[5]);
+    const discountAmount = extractDiscountAmount(match[0]);
+    const prices = calculateNetPrices(quantity, unitPrice, totalPrice, discountAmount);
+
     items.push({
       name,
-      quantity: toNumber(match[2]) || 1,
+      quantity,
       unit: (match[3] || 'un').toLowerCase(),
-      unitPrice: toNumber(match[4]),
-      totalPrice: toNumber(match[5]),
+      unitPrice,
+      totalPrice: prices.netTotalPrice,
+      grossUnitPrice: prices.grossUnitPrice,
+      discountAmount: prices.discountAmount,
+      netUnitPrice: prices.netUnitPrice,
     });
   }
 
@@ -140,13 +259,19 @@ function parseItemsFromHtml(html: string): ParsedItem[] {
     const unit = (text.match(/(?:UN|Unidade)\s*:?\s*([A-Za-zÇÃÕÁÉÍÓÚçãõáéíóú]+)/i)?.[1] || 'un').toLowerCase();
     const unitPrice = toNumber(text.match(/(?:Vl\.?\s*Unit\.?|Valor\s*Unitário)\s*:?\s*([\d.,]+)/i)?.[1]);
     const totalPrice = toNumber(text.match(/(?:Valor\s*Total|Valor)\s*:?\s*([\d.,]+)\s*$/i)?.[1]) || unitPrice * quantity;
+    const grossUnitPrice = unitPrice || (quantity ? totalPrice / quantity : totalPrice);
+    const discountAmount = extractDiscountAmount(text);
+    const prices = calculateNetPrices(quantity, grossUnitPrice, totalPrice, discountAmount);
 
     items.push({
       name,
       quantity,
       unit,
-      unitPrice: unitPrice || (quantity ? totalPrice / quantity : totalPrice),
-      totalPrice,
+      unitPrice: grossUnitPrice,
+      totalPrice: prices.netTotalPrice,
+      grossUnitPrice: prices.grossUnitPrice,
+      discountAmount: prices.discountAmount,
+      netUnitPrice: prices.netUnitPrice,
     });
   }
 
@@ -239,6 +364,22 @@ Deno.serve(async req => {
       throw new Error(`SEFAZ retornou HTTP ${fetched.status}.`);
     }
 
+    const rawDetectedStoreName =
+      extractStoreName(fetched.html) ||
+      cleanStoreName(couponRecord?.store_name) ||
+      null;
+
+    const { data: resolvedMarketName, error: marketError } = await supabase.rpc('resolve_market_name', {
+      p_raw_name: rawDetectedStoreName,
+      p_cnpj: issuerCnpj,
+    });
+
+    if (marketError) {
+      throw new Error(`Erro ao resolver mercado: ${marketError.message}`);
+    }
+
+    const detectedStoreName = resolvedMarketName || rawDetectedStoreName || 'Mercado não identificado';
+
     const items = parseItemsFromHtml(fetched.html);
 
     if (items.length === 0) {
@@ -253,6 +394,9 @@ Deno.serve(async req => {
             imported_items: 0,
             raw_payload: {
               access_key: accessKey,
+              issuer_cnpj: issuerCnpj,
+              detected_store_name: detectedStoreName,
+              raw_detected_store_name: rawDetectedStoreName,
               html_preview: preview,
             },
             error_message:
@@ -296,10 +440,13 @@ Deno.serve(async req => {
       const { error: purchaseError } = await supabase.from('purchase_items').insert({
         product_id: product.id,
         product_name: item.name,
-        store_name: couponRecord?.store_name || 'Montserrat Jundiaí',
+        store_name: detectedStoreName,
         quantity: item.quantity,
         unit: item.unit,
-        unit_price: item.unitPrice,
+        unit_price: item.netUnitPrice || item.unitPrice,
+        gross_unit_price: item.grossUnitPrice || item.unitPrice,
+        discount_amount: item.discountAmount || 0,
+        net_unit_price: item.netUnitPrice || item.unitPrice,
         total_price: item.totalPrice,
         purchase_date: new Date().toISOString().slice(0, 10),
         source: 'nfce-sp',
@@ -320,8 +467,12 @@ Deno.serve(async req => {
           status: 'imported',
           processed_at: new Date().toISOString(),
           imported_items: importedCount,
+          store_name: detectedStoreName,
           raw_payload: {
             access_key: accessKey,
+            issuer_cnpj: issuerCnpj,
+            detected_store_name: detectedStoreName,
+            raw_detected_store_name: rawDetectedStoreName,
             items,
           },
           error_message: null,
@@ -332,6 +483,8 @@ Deno.serve(async req => {
     return jsonResponse({
       ok: true,
       access_key: accessKey,
+      issuer_cnpj: issuerCnpj,
+      store_name: detectedStoreName,
       imported_items: importedCount,
       items,
     });

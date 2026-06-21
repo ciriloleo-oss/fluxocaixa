@@ -32,6 +32,8 @@ type Product = {
   category: string | null;
   default_unit: string | null;
   last_price: number | null;
+  gross_unit_price?: number | null;
+  discount_amount?: number | null;
   avg_price: number | null;
 };
 
@@ -79,6 +81,8 @@ type ProductMarketPrice = {
   market_name: string;
   unit: string | null;
   last_price: number | null;
+  gross_unit_price?: number | null;
+  discount_amount?: number | null;
   avg_price: number | null;
   price_count: number | null;
   last_purchase_date: string | null;
@@ -1182,7 +1186,7 @@ function App() {
                         <div className={`priceRow ${index === 0 ? 'best' : ''}`} key={`${item.product.id}-${price.market_name}`}>
                           <span>{index === 0 ? '🥇 ' : ''}{price.market_name}</span>
                           <strong>{money(price.last_price)}</strong>
-                          <small>{price.price_count || 0} registro(s)</small>
+                          <small>{price.discount_amount ? `desc. ${money(price.discount_amount)}` : `${price.price_count || 0} registro(s)`}</small>
                         </div>
                       ))}
                     </div>
