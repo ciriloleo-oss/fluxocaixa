@@ -988,3 +988,105 @@ button:disabled {
 .priceRow strong{color:var(--accent-dark);white-space:nowrap}
 .priceRow small{color:var(--muted);font-size:12px;white-space:nowrap}
 @media(max-width:860px){.priceComparisonHeader{flex-direction:column}.priceRow{grid-template-columns:1fr}.confidenceBadge{width:fit-content}}
+
+/* V8 - melhorias para compras antigas, cupons e dashboard */
+.sectionActions {
+  align-items: center;
+  margin-top: 18px;
+  margin-bottom: 10px;
+}
+
+.sectionActions .sectionTitle {
+  margin: 0;
+}
+
+.dangerButton {
+  background: #fff0f0;
+  color: #a32020;
+}
+
+.dangerButton:hover {
+  background: #b3261e;
+  color: #fff;
+}
+
+.analyticsPanel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 14px;
+  min-width: 0;
+}
+
+.analyticsPanel .stack {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.couponList {
+  display: grid;
+  gap: 12px;
+}
+
+.couponCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.couponCard .itemMain {
+  min-width: 0;
+}
+
+.couponUrl {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #fbfdf9;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 10px;
+}
+
+.couponUrl:hover,
+.couponUrl:focus {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 860px) {
+  .sectionActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .couponCard {
+    grid-template-columns: 1fr;
+  }
+
+  .couponCard button {
+    width: 100%;
+  }
+
+  .couponUrl {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-height: 84px;
+    overflow-y: auto;
+  }
+}

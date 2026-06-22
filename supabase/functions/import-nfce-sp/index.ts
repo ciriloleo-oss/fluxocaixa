@@ -43,7 +43,6 @@ function extractAccessKey(qrUrl: string) {
 
 function extractIssuerCnpj(qrUrl: string) {
   const accessKey = extractAccessKey(qrUrl);
-  const issuerCnpj = extractIssuerCnpj(qrUrl);
 
   if (accessKey && accessKey.length === 44) {
     return accessKey.slice(6, 20);
@@ -345,6 +344,7 @@ Deno.serve(async req => {
   }
 
   const accessKey = extractAccessKey(qrUrl);
+  const issuerCnpj = extractIssuerCnpj(qrUrl);
 
   try {
     if (couponImportId) {

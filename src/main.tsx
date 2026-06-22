@@ -127,6 +127,38 @@ type PurchaseItem = {
   source: string;
 };
 
+type RecurringProductInsight = {
+  product_name: string;
+  unit: string | null;
+  purchase_count: number;
+  total_quantity: number;
+  avg_unit_price: number;
+  last_purchase_date: string | null;
+};
+
+type ProductPriceTrend = {
+  product_id: string | null;
+  product_name: string;
+  market_name: string | null;
+  unit: string | null;
+  first_price: number | null;
+  last_price: number | null;
+  variation_pct: number | null;
+  purchase_count: number;
+  first_purchase_date: string | null;
+  last_purchase_date: string | null;
+};
+
+type FavoriteProduct = {
+  product_id: string;
+  product_name: string;
+  category: string | null;
+  is_favorite: boolean;
+  desired_price: number | null;
+  created_at: string;
+};
+
+
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const DEFAULT_MARKETS = [
@@ -226,6 +258,9 @@ function App() {
   const [listMarketComparison, setListMarketComparison] = useState<ListMarketComparison[]>([]);
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([]);
   const [marketSummary, setMarketSummary] = useState<MarketSummary[]>([]);
+  const [recurringInsights, setRecurringInsights] = useState<RecurringProductInsight[]>([]);
+  const [priceTrends, setPriceTrends] = useState<ProductPriceTrend[]>([]);
+  const [favoriteProducts, setFavoriteProducts] = useState<FavoriteProduct[]>([]);
 
   const [productName, setProductName] = useState('');
   const [qty, setQty] = useState(1);
@@ -267,7 +302,7 @@ function App() {
   }, [activeList?.id]);
 
   async function loadAll() {
-    const [productsResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse] = await Promise.all([
+    const [productsResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse, recurringResponse, trendsResponse, favoritesResponse] = await Promise.all([
       supabase.from('product_price_summary').select('*').order('name'),
       supabase.from('shopping_lists').select('*').order('created_at', { ascending: false }),
       supabase.from('coupon_imports').select('*').order('created_at', { ascending: false }),
@@ -275,7 +310,10 @@ function App() {
       supabase.from('product_market_prices').select('*').order('product_name'),
       supabase.from('shopping_list_market_comparison').select('*'),
       supabase.from('monthly_spending_summary').select('*').limit(12),
-      supabase.from('market_spending_summary').select('*').limit(12)
+      supabase.from('market_spending_summary').select('*').limit(12),
+      supabase.from('recurring_product_insights').select('*').limit(20),
+      supabase.from('product_price_trends').select('*').limit(40),
+      supabase.from('favorite_products').select('*').eq('is_favorite', true).limit(100)
     ]);
 
     if (!productsResponse.error) setProducts(productsResponse.data || []);
@@ -285,6 +323,9 @@ function App() {
     if (!listMarketResponse.error) setListMarketComparison(listMarketResponse.data || []);
     if (!monthlyResponse.error) setMonthlySummary(monthlyResponse.data || []);
     if (!marketSummaryResponse.error) setMarketSummary(marketSummaryResponse.data || []);
+    if (!recurringResponse.error) setRecurringInsights(recurringResponse.data || []);
+    if (!trendsResponse.error) setPriceTrends(trendsResponse.data || []);
+    if (!favoritesResponse.error) setFavoriteProducts(favoritesResponse.data || []);
 
     if (!listsResponse.error) {
       const loadedLists = listsResponse.data || [];
@@ -411,6 +452,71 @@ function App() {
     if (!confirm(message)) return;
 
     await supabase.from('shopping_lists').update({ status: 'done' }).eq('id', activeList.id);
+    await loadAll();
+  }
+
+  async function finishAllOpenLists() {
+    const openCount = openLists.length;
+    if (openCount === 0) return;
+
+    const ok = confirm(`Concluir todas as ${openCount} compra(s) abertas?`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('shopping_lists')
+      .update({ status: 'done' })
+      .neq('status', 'done');
+
+    if (error) {
+      alert(`Erro ao concluir compras: ${error.message}`);
+      return;
+    }
+
+    await loadAll();
+  }
+
+  async function archiveAllDoneLists() {
+    const doneCount = doneLists.length;
+    if (doneCount === 0) return;
+
+    const ok = confirm(`Ocultar todas as ${doneCount} compra(s) concluídas da tela? Elas continuarão no histórico e nas análises.`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('shopping_lists')
+      .update({ is_archived: true })
+      .eq('status', 'done');
+
+    if (error) {
+      alert(`Erro ao ocultar compras concluídas: ${error.message}`);
+      return;
+    }
+
+    if (activeList?.status === 'done') {
+      setActiveList(null);
+      setItems([]);
+    }
+
+    await loadAll();
+  }
+
+  async function deletePurchase(list: ShoppingList) {
+    const ok = confirm(`Remover definitivamente a compra "${list.name}"?\n\nOs itens desta lista serão removidos, mas o histórico de compras importado dos cupons não será apagado.`);
+    if (!ok) return;
+
+    await supabase.from('shopping_list_items').delete().eq('list_id', list.id);
+    const { error } = await supabase.from('shopping_lists').delete().eq('id', list.id);
+
+    if (error) {
+      alert(`Erro ao remover compra: ${error.message}`);
+      return;
+    }
+
+    if (activeList?.id === list.id) {
+      setActiveList(null);
+      setItems([]);
+    }
+
     await loadAll();
   }
 
@@ -876,6 +982,21 @@ function App() {
       .slice(0, 8);
   }, [products]);
 
+  const recurringSuggestionTotal = recurringInsights
+    .slice(0, 12)
+    .reduce((sum, item) => sum + Number(item.avg_unit_price || 0), 0);
+
+  const favoritesWithAlert = favoriteProducts.filter(favorite => {
+    if (!favorite.desired_price) return false;
+    const product = products.find(item => item.id === favorite.product_id);
+    return Number(product?.last_price || 0) > 0 && Number(product?.last_price || 0) <= Number(favorite.desired_price);
+  });
+
+  const biggestInflation = priceTrends
+    .filter(item => Number(item.variation_pct || 0) > 0)
+    .sort((a, b) => Number(b.variation_pct || 0) - Number(a.variation_pct || 0))
+    .slice(0, 8);
+
   return (
     <div className="appShell">
       <aside className="sideNav">
@@ -952,7 +1073,10 @@ function App() {
 
               <button onClick={() => createPurchase()}><ListPlus size={18} /> Criar compra</button>
 
-              <h2 className="sectionTitle">Compras abertas</h2>
+              <div className="cardTop sectionActions">
+                <h2 className="sectionTitle">Compras abertas</h2>
+                <button type="button" onClick={finishAllOpenLists} disabled={openLists.length === 0}><Check size={16} /> Concluir todas</button>
+              </div>
               <div className="purchaseCards">
                 {openLists.map(list => (
                   <PurchaseCard
@@ -967,7 +1091,10 @@ function App() {
                 {openLists.length === 0 && <p className="empty">Nenhuma compra aberta.</p>}
               </div>
 
-              <h2 className="sectionTitle">Concluídas</h2>
+              <div className="cardTop sectionActions">
+                <h2 className="sectionTitle">Concluídas</h2>
+                <button type="button" onClick={archiveAllDoneLists} disabled={doneLists.length === 0}><Trash2 size={16} /> Ocultar todas</button>
+              </div>
               <div className="purchaseCards compactCards">
                 {doneLists.slice(0, 8).map(list => (
                   <PurchaseCard
@@ -978,6 +1105,7 @@ function App() {
                     onDuplicate={() => duplicatePurchase(list)}
                     onReopen={() => reopenPurchase(list)}
                     onArchive={() => archivePurchase(list)}
+                    onDelete={() => deletePurchase(list)}
                   />
                 ))}
               </div>
@@ -1206,6 +1334,8 @@ function App() {
             <Metric label="Total gasto registrado" value={money(totalPurchased)} note={`${purchases.length} itens comprados`} />
             <Metric label="Produtos monitorados" value={String(products.length)} note="Com preço médio/último preço" />
             <Metric label="Compras criadas" value={String(lists.length)} note={`${openLists.length} abertas`} />
+            <Metric label="Produtos recorrentes" value={String(recurringInsights.length)} note={`Lista sugerida ${money(recurringSuggestionTotal)}`} />
+            <Metric label="Alertas de favoritos" value={String(favoritesWithAlert.length)} note="Abaixo do preço desejado" />
 
             <section className="card wide">
               <h2>Gasto mensal</h2>
@@ -1218,6 +1348,24 @@ function App() {
                   </div>
                 ))}
                 {monthlySummary.length === 0 && <p className="empty">Importe cupons para gerar o histórico mensal.</p>}
+              </div>
+            </section>
+
+            <section className="card wide">
+              <h2>Inteligência V8</h2>
+              <div className="analyticsGrid">
+                <div className="analyticsPanel">
+                  <h3>Produtos recorrentes</h3>
+                  <MiniRows rows={recurringInsights.slice(0, 6).map(item => ({ title: item.product_name, note: `${item.purchase_count} compra(s) • média ${money(item.avg_unit_price)}` }))} empty="Ainda não há recorrência suficiente." />
+                </div>
+                <div className="analyticsPanel">
+                  <h3>Inflação percebida</h3>
+                  <MiniRows rows={biggestInflation.map(item => ({ title: item.product_name, note: `${Number(item.variation_pct || 0).toFixed(1)}% • ${money(item.first_price)} para ${money(item.last_price)}` }))} empty="Ainda não há histórico suficiente." />
+                </div>
+                <div className="analyticsPanel">
+                  <h3>Favoritos em alerta</h3>
+                  <MiniRows rows={favoritesWithAlert.slice(0, 6).map(item => ({ title: item.product_name, note: `Preço desejado: ${money(item.desired_price)}` }))} empty="Marque favoritos e preço desejado no banco para ativar alertas." />
+                </div>
               </div>
             </section>
 
@@ -1258,15 +1406,15 @@ function App() {
                 <button onClick={loadCoupons}><RefreshCw size={18} /> Atualizar</button>
               </div>
 
-              <div className="items">
+              <div className="couponList">
                 {coupons.map(coupon => (
-                  <div className="item" key={coupon.id}>
+                  <div className="couponCard" key={coupon.id}>
                     <div className="itemMain">
                       <strong>Status: {coupon.status}</strong>
                       <span>{coupon.store_name || 'Mercado'} • {new Date(coupon.created_at).toLocaleString('pt-BR')}</span>
                       <span>Itens importados: {coupon.imported_items || 0}</span>
                       {coupon.error_message && <span className="muted">Erro: {coupon.error_message}</span>}
-                      <span className="muted">{coupon.qr_url.slice(0, 120)}...</span>
+                      <span className="couponUrl" title={coupon.qr_url}>{coupon.qr_url}</span>
                     </div>
 
                     <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id || coupon.status === 'imported'}>
@@ -1334,7 +1482,8 @@ function PurchaseCard({
   onClick,
   onDuplicate,
   onReopen,
-  onArchive
+  onArchive,
+  onDelete
 }: {
   list: ShoppingList;
   selected: boolean;
@@ -1344,6 +1493,7 @@ function PurchaseCard({
   onDuplicate?: () => void;
   onReopen?: () => void;
   onArchive?: () => void;
+  onDelete?: () => void;
 }) {
   const progress = itemCount ? Math.round(((checkedCount || 0) / itemCount) * 100) : 0;
 
@@ -1361,11 +1511,12 @@ function PurchaseCard({
         </div>
       </button>
 
-      {(onDuplicate || onReopen || onArchive) && (
+      {(onDuplicate || onReopen || onArchive || onDelete) && (
         <div className="purchaseCardActions">
           {onDuplicate && <button type="button" onClick={onDuplicate}><Copy size={14} /> Duplicar</button>}
           {onReopen && <button type="button" onClick={onReopen}><RefreshCw size={14} /> Reabrir</button>}
           {onArchive && <button type="button" onClick={onArchive}><Trash2 size={14} /> Ocultar</button>}
+          {onDelete && <button type="button" className="dangerButton" onClick={onDelete}><Trash2 size={14} /> Remover</button>}
         </div>
       )}
     </div>
