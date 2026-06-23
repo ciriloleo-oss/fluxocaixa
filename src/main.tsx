@@ -23,7 +23,9 @@ import {
   Tag,
   Trash2,
   UserPlus,
-  Users
+  Users,
+  Edit3,
+  ShieldCheck
 } from 'lucide-react';
 import './styles.css';
 
@@ -176,12 +178,11 @@ type HouseholdInfo = {
 };
 
 type HouseholdMember = {
-  id: string;
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
   role: string;
-  profiles?: {
-    email: string | null;
-    full_name: string | null;
-  } | null;
+  created_at: string | null;
 };
 
 
@@ -329,6 +330,8 @@ function App() {
   const [household, setHousehold] = useState<HouseholdInfo | null>(null);
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [memberEmail, setMemberEmail] = useState('');
+  const [householdNameDraft, setHouseholdNameDraft] = useState('');
+  const [renamingHousehold, setRenamingHousehold] = useState(false);
   const [householdMessage, setHouseholdMessage] = useState('');
 
   useEffect(() => {
@@ -388,14 +391,20 @@ function App() {
 
     if (!error && data && data.length > 0) {
       setHousehold(data[0]);
+      setHouseholdNameDraft(data[0].household_name || 'Minha casa');
 
-      const { data: members } = await supabase
-        .from('household_members')
-        .select('id, role, profiles(email, full_name)')
-        .eq('household_id', data[0].household_id)
-        .order('created_at');
+      const { data: members, error: membersError } = await supabase.rpc('get_household_members');
 
-      setHouseholdMembers((members || []) as HouseholdMember[]);
+      if (!membersError) {
+        setHouseholdMembers((members || []) as HouseholdMember[]);
+      } else {
+        setHouseholdMembers([]);
+        setHouseholdMessage(`Não consegui carregar membros: ${membersError.message}`);
+      }
+    } else {
+      setHousehold(null);
+      setHouseholdMembers([]);
+      setHouseholdNameDraft('');
     }
   }
 
@@ -443,6 +452,32 @@ function App() {
 
     setMemberEmail('');
     setHouseholdMessage('Usuário adicionado ao grupo. Se ele ainda não tiver cadastro, crie o login primeiro e repita este passo.');
+    await loadHousehold();
+  }
+
+
+  async function renameCurrentHousehold() {
+    const name = householdNameDraft.trim();
+    if (!name) {
+      setHouseholdMessage('Informe um nome para a casa.');
+      return;
+    }
+
+    setRenamingHousehold(true);
+    setHouseholdMessage('Renomeando casa...');
+
+    const { error } = await supabase.rpc('update_my_household_name', {
+      p_name: name,
+    });
+
+    setRenamingHousehold(false);
+
+    if (error) {
+      setHouseholdMessage(error.message);
+      return;
+    }
+
+    setHouseholdMessage('Nome da casa atualizado.');
     await loadHousehold();
   }
 
@@ -1697,41 +1732,73 @@ function App() {
         {page === 'produtos' && (
           <section className="pageGrid">
             <section className="card wide accountCard">
-              <div className="cardTop">
+              <div className="cardTop appConfigTop">
                 <div>
-                  <p className="eyebrow">Conta e família</p>
+                  <p className="eyebrow">Conta e casa compartilhada</p>
                   <h2>{household?.household_name || 'Minha casa'}</h2>
-                  <p className="muted">{user.email} • dados compartilhados com membros deste grupo.</p>
+                  <p className="muted">Logado como {user.email}. Listas, cupons e histórico ficam disponíveis para todos os membros desta casa.</p>
                 </div>
                 <button type="button" onClick={signOut}><LogOut size={16} /> Sair</button>
               </div>
 
+              <div className="householdSummary">
+                <div className="householdStat">
+                  <Users size={20} />
+                  <div>
+                    <strong>{householdMembers.length}</strong>
+                    <span>membro(s)</span>
+                  </div>
+                </div>
+                <div className="householdStat">
+                  <ShieldCheck size={20} />
+                  <div>
+                    <strong>{household?.role === 'owner' ? 'Administrador' : household?.role || 'membro'}</strong>
+                    <span>seu perfil</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="householdGrid">
-                <div>
-                  <h3>Membros</h3>
-                  <div className="memberList">
-                    {householdMembers.map(member => (
-                      <div className="memberRow" key={member.id}>
-                        <Users size={16} />
-                        <div>
-                          <strong>{member.profiles?.full_name || member.profiles?.email || 'Usuário'}</strong>
-                          <span>{member.role}</span>
-                        </div>
-                      </div>
-                    ))}
+                <div className="householdPanel">
+                  <h3>Nome da casa</h3>
+                  <p className="muted">Use um nome fácil de reconhecer para quem compartilhar a lista.</p>
+                  <div className="quickAddRow householdInvite">
+                    <input value={householdNameDraft} onChange={event => setHouseholdNameDraft(event.target.value)} placeholder="Ex.: Casa Cirilo" />
+                    <button type="button" onClick={renameCurrentHousehold} disabled={renamingHousehold}><Edit3 size={16} /> Salvar</button>
                   </div>
                 </div>
 
-                <div>
-                  <h3>Compartilhar lista</h3>
-                  <p className="muted">Adicione outro login ao mesmo grupo para compartilhar lista, cupons e histórico.</p>
+                <div className="householdPanel">
+                  <h3>Convidar membro</h3>
+                  <p className="muted">A pessoa precisa ter um login criado no app. Depois, adicione o e-mail aqui para compartilhar listas e histórico.</p>
                   <div className="quickAddRow householdInvite">
                     <input value={memberEmail} onChange={event => setMemberEmail(event.target.value)} placeholder="email da pessoa" />
                     <button type="button" onClick={addMemberToHousehold}><UserPlus size={16} /> Adicionar</button>
                   </div>
-                  {householdMessage && <p className="notice">{householdMessage}</p>}
                 </div>
               </div>
+
+              <div className="memberSection">
+                <div className="sectionHeaderInline">
+                  <h3>Membros da casa</h3>
+                  <button type="button" onClick={loadHousehold}><RefreshCw size={16} /> Atualizar</button>
+                </div>
+
+                <div className="memberList">
+                  {householdMembers.map(member => (
+                    <div className="memberRow" key={member.user_id}>
+                      <div className="memberAvatar">{(member.full_name || member.email || '?').slice(0, 1).toUpperCase()}</div>
+                      <div>
+                        <strong>{member.full_name || member.email || 'Usuário'}</strong>
+                        <span>{member.email || 'sem e-mail'} • {member.role === 'owner' ? 'administrador' : member.role}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {householdMembers.length === 0 && <p className="empty">Nenhum membro carregado ainda.</p>}
+                </div>
+              </div>
+
+              {householdMessage && <p className="notice">{householdMessage}</p>}
             </section>
             <section className="card wide">
               <div className="cardTop">
