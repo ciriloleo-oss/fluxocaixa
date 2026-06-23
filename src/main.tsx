@@ -258,6 +258,7 @@ function getMarket(list?: ShoppingList | null) {
 
 function App() {
   const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'ondeComprar' | 'analises' | 'cupons'>('inicio');
+  const [shoppingMode, setShoppingMode] = useState<'planejar' | 'mercado'>('planejar');
   const [products, setProducts] = useState<Product[]>([]);
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [activeList, setActiveList] = useState<ShoppingList | null>(null);
@@ -1205,76 +1206,123 @@ function App() {
         )}
 
         {page === 'compras' && (
-          <section className="simpleListLayout">
-            <section className="card wide simpleListHero">
-              <div className="cardTop">
-                <div>
-                  <p className="eyebrow">Lista rápida</p>
-                  <h2>{activeList?.name || 'Lista atual'}</h2>
-                  <p className="muted">Use esta tela como referência no supermercado. O histórico fica escondido nas análises.</p>
-                </div>
-                <div className="actions">
-                  <button type="button" onClick={clearActiveList}><Trash2 size={16} /> Limpar lista</button>
-                  <button type="button" onClick={finishAndArchiveActiveList} disabled={!activeList || items.length === 0}><Check size={16} /> Concluir</button>
-                </div>
+          <section className="shoppingFlow">
+            <section className="card wide shoppingModeHeader">
+              <div>
+                <p className="eyebrow">Lista ativa</p>
+                <h2>{activeList?.name || 'Lista atual'}</h2>
+                <p className="muted">Planeje em casa. No mercado, use uma tela limpa só para marcar o que pegou.</p>
               </div>
 
-              <ProgressBar value={progressPct} label={`${checkedCount} de ${items.length} itens marcados`} />
-              <Summary predicted={predictedTotal} checked={checkedTotal} />
-            </section>
-
-            <section className="card wide quickAddCard">
-              <h2>Adicionar produto</h2>
-              <p className="muted">Busque no seu histórico e, quando não encontrar, use a busca online para cadastrar o produto sem preço.</p>
-
-              <div className="quickAddRow">
-                <input
-                  value={catalogSearch}
-                  onChange={event => {
-                    setCatalogSearch(event.target.value);
-                    setProductName(event.target.value);
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') addItem();
-                  }}
-                  placeholder="Digite: leite, pão, monster, arroz..."
-                />
-                <button type="button" onClick={addItem}><Plus size={18} /> Adicionar texto</button>
-                <button type="button" onClick={searchProductsOnline} disabled={searchingProducts || catalogSearch.trim().length < 2}>
-                  <Search size={18} /> {searchingProducts ? 'Buscando...' : 'Buscar online'}
+              <div className="modeSwitch" role="tablist" aria-label="Modo da lista de compras">
+                <button
+                  type="button"
+                  className={shoppingMode === 'planejar' ? 'active' : ''}
+                  onClick={() => setShoppingMode('planejar')}
+                >
+                  Planejar
+                </button>
+                <button
+                  type="button"
+                  className={shoppingMode === 'mercado' ? 'active' : ''}
+                  onClick={() => setShoppingMode('mercado')}
+                >
+                  No mercado
                 </button>
               </div>
-
-              <div className="catalogResults">
-                {mergedCatalogResults.map(result => (
-                  <button className="catalogResult" key={`${result.source}-${result.barcode || result.name}`} onClick={() => addCatalogResultToList(result)}>
-                    <strong>{result.name}</strong>
-                    <span>{result.brand ? `${result.brand} • ` : ''}{result.category || 'Produto'} • {result.unit || 'un'} • {result.source || 'catálogo'}</span>
-                  </button>
-                ))}
-                {catalogSearch.trim() && mergedCatalogResults.length === 0 && !searchingProducts && (
-                  <p className="empty">Nenhum produto encontrado ainda. Use “Adicionar texto” para criar mesmo assim.</p>
-                )}
-              </div>
             </section>
 
-            <section className="card wide marketMode shoppingOnlyCard">
-              <div className="cardTop">
-                <div>
-                  <h2>Minha lista</h2>
-                  <p className="muted">Itens pendentes ficam em cima. Marcados vão para baixo.</p>
-                </div>
-                {bestActiveMarket && (
-                  <div className="bestMarketMini">
-                    <span>Melhor mercado estimado</span>
-                    <strong>{bestActiveMarket.market_name}</strong>
-                    <small>{money(bestActiveMarket.estimated_total)} • {bestActiveMarket.coverage_pct}% coberto</small>
+            {shoppingMode === 'planejar' && (
+              <>
+                <section className="card wide plannerHero">
+                  <div className="cardTop">
+                    <div>
+                      <h2>Montar lista</h2>
+                      <p className="muted">Adicione produtos, ajuste quantidades e deixe tudo pronto antes de sair.</p>
+                    </div>
+                    <div className="actions">
+                      <button type="button" onClick={clearActiveList}><Trash2 size={16} /> Limpar lista</button>
+                      <button type="button" onClick={() => setShoppingMode('mercado')} disabled={items.length === 0}><ShoppingCart size={16} /> Ir para mercado</button>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              <ItemList items={items} products={products} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
-            </section>
+                  <div className="plannerStats">
+                    <Metric label="Itens na lista" value={String(items.length)} note={`${checkedCount} já marcados`} />
+                    <Metric label="Estimativa" value={money(predictedTotal)} note="Com preços conhecidos" />
+                    <Metric label="Melhor mercado" value={bestActiveMarket?.market_name || '-'} note={bestActiveMarket ? `${money(bestActiveMarket.estimated_total)} • ${bestActiveMarket.coverage_pct}% coberto` : 'Sem dados suficientes'} />
+                  </div>
+                </section>
+
+                <section className="card wide quickAddCard">
+                  <h2>Adicionar produto</h2>
+                  <p className="muted">A busca mostra primeiro seus produtos e histórico. Se precisar, use a busca online para cadastrar produto sem preço.</p>
+
+                  <div className="quickAddRow">
+                    <input
+                      value={catalogSearch}
+                      onChange={event => {
+                        setCatalogSearch(event.target.value);
+                        setProductName(event.target.value);
+                      }}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') addItem();
+                      }}
+                      placeholder="Digite: leite, pão, monster, arroz..."
+                    />
+                    <button type="button" onClick={addItem}><Plus size={18} /> Adicionar texto</button>
+                    <button type="button" onClick={searchProductsOnline} disabled={searchingProducts || catalogSearch.trim().length < 2}>
+                      <Search size={18} /> {searchingProducts ? 'Buscando...' : 'Buscar online'}
+                    </button>
+                  </div>
+
+                  <div className="catalogResults">
+                    {mergedCatalogResults.map(result => (
+                      <button className="catalogResult" key={`${result.source}-${result.barcode || result.name}`} onClick={() => addCatalogResultToList(result)}>
+                        <strong>{result.name}</strong>
+                        <span>{result.brand ? `${result.brand} • ` : ''}{result.category || 'Produto'} • {result.unit || 'un'} • {result.source || 'catálogo'}</span>
+                      </button>
+                    ))}
+                    {catalogSearch.trim() && mergedCatalogResults.length === 0 && !searchingProducts && (
+                      <p className="empty">Nenhum produto encontrado ainda. Use “Adicionar texto” para criar mesmo assim.</p>
+                    )}
+                  </div>
+                </section>
+
+                <section className="card wide plannerListCard">
+                  <div className="cardTop">
+                    <div>
+                      <h2>Lista em preparação</h2>
+                      <p className="muted">Aqui você pode editar quantidade, remover itens e organizar antes da compra.</p>
+                    </div>
+                  </div>
+                  <ItemList items={items} products={products} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
+                </section>
+              </>
+            )}
+
+            {shoppingMode === 'mercado' && (
+              <section className="card wide marketRunCard">
+                <div className="marketRunTop">
+                  <div>
+                    <p className="eyebrow">Modo mercado</p>
+                    <h2>{items.filter(item => !item.checked).length} item(ns) pendente(s)</h2>
+                    <p className="muted">Tela simplificada para usar no celular dentro do supermercado.</p>
+                  </div>
+                  <div className="actions">
+                    <button type="button" onClick={() => setShoppingMode('planejar')}><ListPlus size={16} /> Editar lista</button>
+                    <button type="button" onClick={finishAndArchiveActiveList} disabled={!activeList || items.length === 0}><Check size={16} /> Finalizar</button>
+                  </div>
+                </div>
+
+                <ProgressBar value={progressPct} label={`${checkedCount} de ${items.length} itens pegos`} />
+
+                <MarketRunList
+                  items={items}
+                  products={products}
+                  onToggle={toggleItem}
+                />
+              </section>
+            )}
 
             <details className="card wide oldListsPanel">
               <summary>Compras antigas e manutenção</summary>
@@ -1650,6 +1698,72 @@ function PurchaseCard({
           {onDelete && <button type="button" className="dangerButton" onClick={onDelete}><Trash2 size={14} /> Remover</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+
+function MarketRunList({
+  items,
+  products,
+  onToggle
+}: {
+  items: ListItem[];
+  products: Product[];
+  onToggle: (item: ListItem) => void;
+}) {
+  const pendingItems = items.filter(item => !item.checked);
+  const boughtItems = items.filter(item => item.checked);
+
+  return (
+    <div className="marketRunList">
+      {pendingItems.length > 0 ? (
+        groupItemsByCategory(pendingItems, products).map(([category, categoryItems]) => (
+          <section className="marketRunCategory" key={`mercado-${category}`}>
+            <div className="categoryHeader">
+              <span><Tag size={14} /> {category}</span>
+              <small>{categoryItems.length} item(ns)</small>
+            </div>
+
+            <div className="marketRunItems">
+              {categoryItems.map(item => (
+                <button className="marketRunItem" key={item.id} onClick={() => onToggle(item)}>
+                  <Circle size={26} />
+                  <div>
+                    <strong>{item.product_name}</strong>
+                    <span>{item.quantity} {item.unit}{item.estimated_unit_price ? ` • ${money(item.quantity * item.estimated_unit_price)}` : ''}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))
+      ) : (
+        <div className="allDoneBox">
+          <Check size={34} />
+          <strong>Todos os itens foram marcados.</strong>
+          <span>Revise os itens pegos abaixo ou finalize a compra.</span>
+        </div>
+      )}
+
+      {boughtItems.length > 0 && (
+        <details className="boughtItemsBox">
+          <summary>Itens já pegos ({boughtItems.length})</summary>
+          <div className="marketRunItems bought">
+            {boughtItems.map(item => (
+              <button className="marketRunItem checked" key={item.id} onClick={() => onToggle(item)}>
+                <Check size={24} />
+                <div>
+                  <strong>{item.product_name}</strong>
+                  <span>{item.quantity} {item.unit}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {items.length === 0 && <p className="empty">Monte sua lista na aba Planejar antes de ir ao mercado.</p>}
     </div>
   );
 }
