@@ -9,8 +9,6 @@ import {
   Check,
   Circle,
   Copy,
-  FileSearch,
-  Home,
   ListChecks,
   ListPlus,
   Minus,
@@ -257,7 +255,7 @@ function getMarket(list?: ShoppingList | null) {
 }
 
 function App() {
-  const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'ondeComprar' | 'analises' | 'cupons'>('inicio');
+  const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'ondeComprar' | 'analises' | 'cupons'>('compras');
   const [shoppingMode, setShoppingMode] = useState<'planejar' | 'mercado'>('planejar');
   const [products, setProducts] = useState<Product[]>([]);
   const [lists, setLists] = useState<ShoppingList[]>([]);
@@ -1150,31 +1148,31 @@ function App() {
   }, [localCatalogMatches, onlineResults]);
 
   return (
-    <div className="appShell">
-      <aside className="sideNav">
-        <div className="brand">
-          <span>CI</span>
-          <div>
-            <strong>Compra Inteligente</strong>
-            <small>Comparador pessoal</small>
-          </div>
+    <div className="mobileAppShell">
+      <header className="appTopBar">
+        <div className="appLogo">CI</div>
+        <div>
+          <strong>Compra Inteligente</strong>
+          <span>{items.length} item(ns) • {money(predictedTotal)} previsto</span>
         </div>
+      </header>
 
-        <button className={page === 'inicio' ? 'active' : ''} onClick={() => setPage('inicio')}><Home size={18} /> Início</button>
-        <button className={page === 'compras' ? 'active' : ''} onClick={() => setPage('compras')}><ListChecks size={18} /> Compras</button>
-        <button className={page === 'produtos' ? 'active' : ''} onClick={() => setPage('produtos')}><PackageSearch size={18} /> Produtos</button>
-        <button className={page === 'ondeComprar' ? 'active' : ''} onClick={() => setPage('ondeComprar')}><Store size={18} /> Onde Comprar</button>
-        <button className={page === 'analises' ? 'active' : ''} onClick={() => setPage('analises')}><BarChart3 size={18} /> Análises</button>
-        <button className={page === 'cupons' ? 'active' : ''} onClick={() => { setPage('cupons'); loadCoupons(); }}><FileSearch size={18} /> Cupons</button>
-      </aside>
-
-      <main className="workspace">
-        <header className="pageHeader">
+      <main className="mobileWorkspace">
+        <header className="pageHeader appPageHeader">
           <div>
-            <p className="eyebrow">NFC-e SP • compras por supermercado</p>
-            <h1>{pageTitle(page)}</h1>
+            <p className="eyebrow">{pageEyebrow(page, shoppingMode)}</p>
+            <h1>{mobilePageTitle(page, shoppingMode)}</h1>
           </div>
-          <div className="pill">{money(predictedTotal)} previsto</div>
+          {page === 'compras' && (
+            <button
+              type="button"
+              className="pill actionPill"
+              onClick={() => setShoppingMode(shoppingMode === 'planejar' ? 'mercado' : 'planejar')}
+              disabled={items.length === 0 && shoppingMode === 'planejar'}
+            >
+              {shoppingMode === 'planejar' ? 'Ir ao mercado' : 'Editar lista'}
+            </button>
+          )}
         </header>
 
         {page === 'inicio' && (
@@ -1608,6 +1606,49 @@ function App() {
           </section>
         )}
       </main>
+
+      <nav className="bottomNav" aria-label="Navegação principal">
+        <button
+          type="button"
+          className={page === 'compras' && shoppingMode === 'planejar' ? 'active' : ''}
+          onClick={() => { setPage('compras'); setShoppingMode('planejar'); }}
+        >
+          <ListChecks size={20} />
+          <span>Lista</span>
+        </button>
+        <button
+          type="button"
+          className={page === 'compras' && shoppingMode === 'mercado' ? 'active' : ''}
+          onClick={() => { setPage('compras'); setShoppingMode('mercado'); }}
+        >
+          <ShoppingCart size={20} />
+          <span>Mercado</span>
+        </button>
+        <button
+          type="button"
+          className={page === 'cupons' ? 'active' : ''}
+          onClick={() => { setPage('cupons'); loadCoupons(); }}
+        >
+          <Camera size={20} />
+          <span>Cupom</span>
+        </button>
+        <button
+          type="button"
+          className={page === 'analises' || page === 'ondeComprar' ? 'active' : ''}
+          onClick={() => setPage('analises')}
+        >
+          <BarChart3 size={20} />
+          <span>Insights</span>
+        </button>
+        <button
+          type="button"
+          className={page === 'produtos' ? 'active' : ''}
+          onClick={() => setPage('produtos')}
+        >
+          <PackageSearch size={20} />
+          <span>Config</span>
+        </button>
+      </nav>
     </div>
   );
 }
@@ -1623,6 +1664,22 @@ function sourceLabel(source?: string | null) {
   };
 
   return labels[source || ''] || source || 'catálogo';
+}
+
+function mobilePageTitle(page: string, shoppingMode: string) {
+  if (page === 'compras') return shoppingMode === 'mercado' ? 'No Mercado' : 'Minha Lista';
+  if (page === 'analises') return 'Insights';
+  if (page === 'produtos') return 'Configurações';
+  if (page === 'cupons') return 'Cupom';
+  return pageTitle(page);
+}
+
+function pageEyebrow(page: string, shoppingMode: string) {
+  if (page === 'compras') return shoppingMode === 'mercado' ? 'Checklist de compra' : 'Planejamento da compra';
+  if (page === 'cupons') return 'NFC-e e histórico';
+  if (page === 'analises') return 'Inteligência de preços';
+  if (page === 'produtos') return 'Produtos e catálogo';
+  return 'Compra Inteligente';
 }
 
 function pageTitle(page: string) {

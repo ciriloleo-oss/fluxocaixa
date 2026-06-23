@@ -1436,3 +1436,406 @@ button:disabled {
     border-radius: 22px;
   }
 }
+
+/* V9 - Mobile First App Shell */
+.mobileAppShell {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(47, 125, 50, 0.16), transparent 32%),
+    var(--bg);
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
+}
+
+.appTopBar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  background: rgba(243, 246, 238, 0.92);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(226, 232, 220, 0.82);
+}
+
+.appLogo {
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 950;
+  box-shadow: 0 10px 24px rgba(47, 125, 50, 0.22);
+}
+
+.appTopBar strong {
+  display: block;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.appTopBar span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.mobileWorkspace {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 18px 14px 20px;
+}
+
+.appPageHeader {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.appPageHeader h1 {
+  font-size: clamp(30px, 9vw, 46px);
+}
+
+.actionPill {
+  border: 0;
+  min-height: 46px;
+}
+
+.bottomNav {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 60;
+  width: min(980px, 100%);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.bottomNav button {
+  min-width: 0;
+  min-height: 58px;
+  border-radius: 18px;
+  padding: 7px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.bottomNav button svg {
+  flex: 0 0 auto;
+}
+
+.bottomNav button.active {
+  background: var(--soft);
+  color: var(--accent-dark);
+}
+
+.bottomNav button:hover {
+  background: var(--soft);
+  color: var(--accent-dark);
+}
+
+.shoppingFlow,
+.pageGrid {
+  gap: 14px;
+}
+
+.card,
+.metricCard,
+.heroCard {
+  border-radius: 26px;
+}
+
+.shoppingModeHeader {
+  display: none;
+}
+
+.plannerHero {
+  background: linear-gradient(135deg, #102015, #2f7d32);
+  color: #fff;
+}
+
+.plannerHero .muted,
+.plannerHero .eyebrow,
+.plannerHero .metricCard small,
+.plannerHero .metricCard span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.plannerHero .metricCard {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+
+.plannerHero .metricCard strong {
+  color: #fff;
+}
+
+.plannerStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quickAddCard input,
+.quickAddCard button,
+.marketRunCard button,
+.couponPrimaryAction button {
+  min-height: 48px;
+}
+
+.quickAddRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.catalogResults {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.catalogResult {
+  width: 100%;
+  display: block;
+  text-align: left;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.catalogResult:hover {
+  color: var(--text);
+  background: var(--soft);
+}
+
+.catalogResult strong,
+.catalogResult span {
+  display: block;
+}
+
+.catalogResult span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.marketRunCard {
+  min-height: calc(100vh - 190px);
+}
+
+.marketRunTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.marketRunCard .item,
+.marketRunCard .marketRunItem {
+  min-height: 68px;
+  border-radius: 22px;
+}
+
+.marketRunCard .itemMain strong {
+  font-size: 17px;
+}
+
+.oldListsPanel {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.oldListsPanel summary {
+  cursor: pointer;
+  font-weight: 950;
+  color: var(--accent-dark);
+}
+
+.oldListsActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+/* Cupom: estilo app, sem URL estourando layout */
+textarea,
+.itemMain .muted,
+.itemMain span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scanner video {
+  max-height: 260px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@media (min-width: 861px) {
+  .mobileAppShell {
+    padding-bottom: 106px;
+  }
+
+  .bottomNav {
+    bottom: 16px;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    width: min(720px, calc(100% - 32px));
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
+  }
+
+  .mobileWorkspace {
+    padding-top: 24px;
+  }
+}
+
+@media (max-width: 860px) {
+  body {
+    background: var(--bg);
+  }
+
+  .mobileWorkspace {
+    padding: 14px 12px 20px;
+  }
+
+  .pageHeader,
+  .appPageHeader {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .appPageHeader .pill {
+    width: auto;
+    flex: 0 0 auto;
+    padding: 11px 13px;
+    font-size: 12px;
+  }
+
+  .pageGrid,
+  .shoppingFlow {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .plannerStats {
+    grid-template-columns: 1fr;
+  }
+
+  .quickAddRow {
+    grid-template-columns: 1fr;
+  }
+
+  .quickAddRow button {
+    width: 100%;
+  }
+
+  .marketRunTop,
+  .cardTop {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .marketRunTop .actions,
+  .cardTop .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .marketRunTop .actions button,
+  .cardTop .actions button {
+    width: 100%;
+  }
+
+  .card,
+  .metricCard,
+  .heroCard {
+    border-radius: 24px;
+    padding: 16px;
+  }
+
+  .summary,
+  .heroStats,
+  .plannerStats {
+    gap: 8px;
+  }
+
+  .bottomNav span {
+    font-size: 10px;
+  }
+
+  .item,
+  .productOption,
+  .priceComparisonCard,
+  .duplicateCandidate,
+  .purchaseCard {
+    border-radius: 22px;
+  }
+
+  .priceRow {
+    grid-template-columns: 1fr;
+  }
+
+  .analyticsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .appTopBar {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .appLogo {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+  }
+
+  .appTopBar strong {
+    font-size: 14px;
+  }
+
+  .appTopBar span {
+    font-size: 11px;
+  }
+
+  .bottomNav {
+    gap: 2px;
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .bottomNav button {
+    min-height: 56px;
+    border-radius: 16px;
+  }
+}
