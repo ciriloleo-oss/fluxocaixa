@@ -1090,3 +1090,148 @@ button:disabled {
     overflow-y: auto;
   }
 }
+
+/* V8.1 - Lista simples e catalogo de produtos */
+.simpleListLayout {
+  display: grid;
+  gap: 16px;
+}
+
+.simpleListHero {
+  background: linear-gradient(135deg, #ffffff, #f5fbf2);
+}
+
+.quickAddCard {
+  position: relative;
+  overflow: hidden;
+}
+
+.quickAddRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.quickAddRow input {
+  margin: 0;
+}
+
+.catalogResults {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.catalogResult {
+  width: 100%;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 13px;
+  text-align: left;
+  justify-content: flex-start;
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.catalogResult:hover {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--text);
+}
+
+.catalogResult strong {
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.catalogResult span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.shoppingOnlyCard .marketList {
+  margin-top: 8px;
+}
+
+.bestMarketMini {
+  background: var(--soft);
+  color: var(--accent-dark);
+  border-radius: 18px;
+  padding: 12px 14px;
+  min-width: 210px;
+}
+
+.bestMarketMini span,
+.bestMarketMini small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bestMarketMini strong {
+  display: block;
+  margin: 3px 0;
+}
+
+.oldListsPanel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.oldListsPanel summary {
+  cursor: pointer;
+  padding: 18px;
+  font-weight: 900;
+  color: var(--accent-dark);
+}
+
+.oldListsPanel[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.oldListsPanel .purchaseCards,
+.oldListsActions {
+  margin: 14px 18px 18px;
+}
+
+.oldListsActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 860px) {
+  .quickAddRow {
+    grid-template-columns: 1fr;
+  }
+
+  .quickAddRow button {
+    width: 100%;
+  }
+
+  .catalogResults {
+    grid-template-columns: 1fr;
+  }
+
+  .simpleListHero .cardTop,
+  .shoppingOnlyCard .cardTop {
+    flex-direction: column;
+  }
+
+  .bestMarketMini {
+    width: 100%;
+  }
+
+  .oldListsActions button {
+    width: 100%;
+  }
+}

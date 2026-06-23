@@ -37,6 +37,16 @@ type Product = {
   avg_price: number | null;
 };
 
+
+type CatalogSearchResult = {
+  name: string;
+  brand?: string | null;
+  category?: string | null;
+  unit?: string | null;
+  barcode?: string | null;
+  source?: string | null;
+};
+
 type ShoppingList = {
   id: string;
   name: string;
@@ -258,6 +268,10 @@ function App() {
   const [listMarketComparison, setListMarketComparison] = useState<ListMarketComparison[]>([]);
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([]);
   const [marketSummary, setMarketSummary] = useState<MarketSummary[]>([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [onlineResults, setOnlineResults] = useState<CatalogSearchResult[]>([]);
+  const [searchingProducts, setSearchingProducts] = useState(false);
+
   const [recurringInsights, setRecurringInsights] = useState<RecurringProductInsight[]>([]);
   const [priceTrends, setPriceTrends] = useState<ProductPriceTrend[]>([]);
   const [favoriteProducts, setFavoriteProducts] = useState<FavoriteProduct[]>([]);
@@ -364,6 +378,129 @@ function App() {
       .order('created_at', { ascending: false });
 
     setCoupons(data || []);
+  }
+
+  async function getOrCreateActiveList() {
+    if (activeList?.status !== 'done') return activeList;
+
+    const { data, error } = await supabase
+      .from('shopping_lists')
+      .insert({
+        name: 'Lista atual',
+        store_name: newMarketName === 'Outro' ? (customMarketName.trim() || 'Outro') : newMarketName,
+        market_name: newMarketName === 'Outro' ? (customMarketName.trim() || 'Outro') : newMarketName,
+        purchase_date: todayISO(),
+        status: 'open',
+        is_archived: false
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert(error?.message || 'Não consegui criar a lista atual.');
+      return null;
+    }
+
+    setLists(current => [data, ...current]);
+    setActiveList(data);
+    setItems([]);
+    return data as ShoppingList;
+  }
+
+  async function clearActiveList() {
+    const list = await getOrCreateActiveList();
+    if (!list) return;
+
+    if (items.length > 0) {
+      const ok = confirm('Limpar todos os itens da lista atual?');
+      if (!ok) return;
+    }
+
+    await supabase.from('shopping_list_items').delete().eq('list_id', list.id);
+    await supabase.rpc('recalculate_list_totals', { p_list_id: list.id });
+    setItems([]);
+    await loadAll();
+  }
+
+  async function finishAndArchiveActiveList() {
+    if (!activeList) return;
+
+    const ok = confirm('Concluir esta lista e tirar ela da tela principal? O histórico continuará nas análises.');
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('shopping_lists')
+      .update({ status: 'done', is_archived: true })
+      .eq('id', activeList.id);
+
+    if (error) {
+      alert(`Erro ao concluir lista: ${error.message}`);
+      return;
+    }
+
+    setActiveList(null);
+    setItems([]);
+    await loadAll();
+  }
+
+  async function searchProductsOnline() {
+    const query = catalogSearch.trim();
+    if (query.length < 2) return;
+
+    setSearchingProducts(true);
+    const { data, error } = await supabase.functions.invoke('search-products', {
+      body: { query }
+    });
+    setSearchingProducts(false);
+
+    if (error) {
+      alert(`Erro na busca online: ${error.message}`);
+      return;
+    }
+
+    setOnlineResults(data?.results || []);
+  }
+
+  async function addCatalogResultToList(result: CatalogSearchResult) {
+    const list = await getOrCreateActiveList();
+    if (!list) return;
+
+    const name = normalizeName(result.name);
+    const unitValue = result.unit || 'un';
+
+    const { data: product } = await supabase
+      .from('products')
+      .upsert({ name, default_unit: unitValue, category: result.category || inferCategory(name) }, { onConflict: 'name' })
+      .select()
+      .single();
+
+    await supabase.from('product_catalog').upsert({
+      name,
+      brand: result.brand || null,
+      category: result.category || inferCategory(name),
+      default_unit: unitValue,
+      barcode: result.barcode || null,
+      source: result.source || 'manual',
+      product_id: product?.id || null
+    }, { onConflict: 'name' });
+
+    const { error } = await supabase.from('shopping_list_items').insert({
+      list_id: list.id,
+      product_id: product?.id || null,
+      product_name: name,
+      quantity: 1,
+      unit: unitValue,
+      estimated_unit_price: Number(product?.last_price || product?.avg_price || 0),
+      checked: false
+    });
+
+    if (error) {
+      alert(`Erro ao adicionar produto: ${error.message}`);
+      return;
+    }
+
+    await loadItems(list.id);
+    await refreshListTotals();
   }
 
   async function createPurchase(name = newListName) {
@@ -578,14 +715,16 @@ function App() {
   }
 
   async function addItem() {
-    if (!activeList || !productName.trim()) return;
+    if (!productName.trim()) return;
+    const list = await getOrCreateActiveList();
+    if (!list) return;
 
     const name = normalizeName(productName);
     const existing = products.find(product => product.name === name);
     const estimated = price || existing?.last_price || existing?.avg_price || 0;
 
     const { error } = await supabase.from('shopping_list_items').insert({
-      list_id: activeList.id,
+      list_id: list.id,
       product_id: existing?.id || null,
       product_name: name,
       quantity: Number(qty || 1),
@@ -597,33 +736,18 @@ function App() {
       setProductName('');
       setQty(1);
       setPrice(0);
-      await loadItems(activeList.id);
+      await loadItems(list.id);
       await refreshListTotals();
     }
   }
 
   async function addProductFromHistory(product: Product) {
-    if (!activeList) {
-      await createPurchase('Compra da Semana');
-      return;
-    }
-
-    const { error } = await supabase.from('shopping_list_items').insert({
-      list_id: activeList.id,
-      product_id: product.id,
-      product_name: product.name,
-      quantity: 1,
+    await addCatalogResultToList({
+      name: product.name,
+      category: product.category || inferCategory(product.name),
       unit: product.default_unit || 'un',
-      estimated_unit_price: Number(product.last_price || product.avg_price || 0)
+      source: 'historico'
     });
-
-    if (error) {
-      alert(`Erro ao adicionar produto: ${error.message}`);
-      return;
-    }
-
-    await loadItems(activeList.id);
-    await refreshListTotals();
   }
 
 
@@ -997,6 +1121,33 @@ function App() {
     .sort((a, b) => Number(b.variation_pct || 0) - Number(a.variation_pct || 0))
     .slice(0, 8);
 
+  const localCatalogMatches = useMemo(() => {
+    const query = normalizeName(catalogSearch);
+    if (!query) return filteredProducts.slice(0, 12).map(product => ({
+      name: product.name,
+      category: product.category || inferCategory(product.name),
+      unit: product.default_unit || 'un',
+      source: 'historico'
+    }));
+
+    return products
+      .filter(product => product.name.includes(query))
+      .slice(0, 12)
+      .map(product => ({
+        name: product.name,
+        category: product.category || inferCategory(product.name),
+        unit: product.default_unit || 'un',
+        source: 'historico'
+      }));
+  }, [catalogSearch, products, filteredProducts]);
+
+  const mergedCatalogResults = useMemo(() => {
+    const map = new Map<string, CatalogSearchResult>();
+    for (const item of localCatalogMatches) map.set(normalizeName(item.name), item);
+    for (const item of onlineResults) map.set(normalizeName(item.name), item);
+    return Array.from(map.values()).slice(0, 24);
+  }, [localCatalogMatches, onlineResults]);
+
   return (
     <div className="appShell">
       <aside className="sideNav">
@@ -1054,49 +1205,85 @@ function App() {
         )}
 
         {page === 'compras' && (
-          <section className="pageGrid">
-            <section className="card">
-              <h2>Nova compra</h2>
-              <input value={newListName} onChange={event => setNewListName(event.target.value)} placeholder="Nome da compra" />
-
-              <label className="fieldLabel">Supermercado</label>
-              <select value={newMarketName} onChange={event => setNewMarketName(event.target.value)}>
-                {DEFAULT_MARKETS.map(market => <option key={market} value={market}>{market}</option>)}
-              </select>
-
-              {newMarketName === 'Outro' && (
-                <input value={customMarketName} onChange={event => setCustomMarketName(event.target.value)} placeholder="Nome do supermercado" />
-              )}
-
-              <label className="fieldLabel">Data da compra</label>
-              <input type="date" value={newPurchaseDate} onChange={event => setNewPurchaseDate(event.target.value)} />
-
-              <button onClick={() => createPurchase()}><ListPlus size={18} /> Criar compra</button>
-
-              <div className="cardTop sectionActions">
-                <h2 className="sectionTitle">Compras abertas</h2>
-                <button type="button" onClick={finishAllOpenLists} disabled={openLists.length === 0}><Check size={16} /> Concluir todas</button>
+          <section className="simpleListLayout">
+            <section className="card wide simpleListHero">
+              <div className="cardTop">
+                <div>
+                  <p className="eyebrow">Lista rápida</p>
+                  <h2>{activeList?.name || 'Lista atual'}</h2>
+                  <p className="muted">Use esta tela como referência no supermercado. O histórico fica escondido nas análises.</p>
+                </div>
+                <div className="actions">
+                  <button type="button" onClick={clearActiveList}><Trash2 size={16} /> Limpar lista</button>
+                  <button type="button" onClick={finishAndArchiveActiveList} disabled={!activeList || items.length === 0}><Check size={16} /> Concluir</button>
+                </div>
               </div>
-              <div className="purchaseCards">
-                {openLists.map(list => (
-                  <PurchaseCard
-                    key={list.id}
-                    list={list}
-                    selected={activeList?.id === list.id}
-                    itemCount={activeList?.id === list.id ? items.length : undefined}
-                    checkedCount={activeList?.id === list.id ? checkedCount : undefined}
-                    onClick={() => setActiveList(list)}
-                  />
+
+              <ProgressBar value={progressPct} label={`${checkedCount} de ${items.length} itens marcados`} />
+              <Summary predicted={predictedTotal} checked={checkedTotal} />
+            </section>
+
+            <section className="card wide quickAddCard">
+              <h2>Adicionar produto</h2>
+              <p className="muted">Busque no seu histórico e, quando não encontrar, use a busca online para cadastrar o produto sem preço.</p>
+
+              <div className="quickAddRow">
+                <input
+                  value={catalogSearch}
+                  onChange={event => {
+                    setCatalogSearch(event.target.value);
+                    setProductName(event.target.value);
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') addItem();
+                  }}
+                  placeholder="Digite: leite, pão, monster, arroz..."
+                />
+                <button type="button" onClick={addItem}><Plus size={18} /> Adicionar texto</button>
+                <button type="button" onClick={searchProductsOnline} disabled={searchingProducts || catalogSearch.trim().length < 2}>
+                  <Search size={18} /> {searchingProducts ? 'Buscando...' : 'Buscar online'}
+                </button>
+              </div>
+
+              <div className="catalogResults">
+                {mergedCatalogResults.map(result => (
+                  <button className="catalogResult" key={`${result.source}-${result.barcode || result.name}`} onClick={() => addCatalogResultToList(result)}>
+                    <strong>{result.name}</strong>
+                    <span>{result.brand ? `${result.brand} • ` : ''}{result.category || 'Produto'} • {result.unit || 'un'} • {result.source || 'catálogo'}</span>
+                  </button>
                 ))}
-                {openLists.length === 0 && <p className="empty">Nenhuma compra aberta.</p>}
+                {catalogSearch.trim() && mergedCatalogResults.length === 0 && !searchingProducts && (
+                  <p className="empty">Nenhum produto encontrado ainda. Use “Adicionar texto” para criar mesmo assim.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="card wide marketMode shoppingOnlyCard">
+              <div className="cardTop">
+                <div>
+                  <h2>Minha lista</h2>
+                  <p className="muted">Itens pendentes ficam em cima. Marcados vão para baixo.</p>
+                </div>
+                {bestActiveMarket && (
+                  <div className="bestMarketMini">
+                    <span>Melhor mercado estimado</span>
+                    <strong>{bestActiveMarket.market_name}</strong>
+                    <small>{money(bestActiveMarket.estimated_total)} • {bestActiveMarket.coverage_pct}% coberto</small>
+                  </div>
+                )}
               </div>
 
-              <div className="cardTop sectionActions">
-                <h2 className="sectionTitle">Concluídas</h2>
-                <button type="button" onClick={archiveAllDoneLists} disabled={doneLists.length === 0}><Trash2 size={16} /> Ocultar todas</button>
+              <ItemList items={items} products={products} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
+            </section>
+
+            <details className="card wide oldListsPanel">
+              <summary>Compras antigas e manutenção</summary>
+              <div className="oldListsActions">
+                <button type="button" onClick={finishAllOpenLists} disabled={openLists.length === 0}><Check size={16} /> Concluir abertas</button>
+                <button type="button" onClick={archiveAllDoneLists} disabled={doneLists.length === 0}><Trash2 size={16} /> Ocultar concluídas</button>
               </div>
               <div className="purchaseCards compactCards">
-                {doneLists.slice(0, 8).map(list => (
+                {[...openLists, ...doneLists].slice(0, 12).map(list => (
                   <PurchaseCard
                     key={list.id}
                     list={list}
@@ -1109,63 +1296,7 @@ function App() {
                   />
                 ))}
               </div>
-            </section>
-
-            <section className="card wide marketMode">
-              <div className="cardTop">
-                <div>
-                  <h2>{activeList?.name || 'Compra ativa'}</h2>
-                  <p className="muted"><Store size={14} /> {getMarket(activeList)} {activeList?.purchase_date ? `• ${formatDate(activeList.purchase_date)}` : ''}</p>
-                </div>
-                <div className="actions">
-                  <button onClick={duplicateActiveList} disabled={!activeList}><Copy size={16} /> Duplicar</button>
-                  <button onClick={finishActiveList} disabled={!activeList}><Check size={16} /> Concluir</button>
-                </div>
-              </div>
-
-              <ProgressBar value={progressPct} label={`${checkedCount} de ${items.length} itens pegos`} />
-              <Summary predicted={predictedTotal} checked={checkedTotal} />
-
-              {activeListMarketOptions.length > 0 && (
-                <div className="marketComparisonBox">
-                  <h3>Melhor mercado para esta compra</h3>
-                  <div className="marketOptions">
-                    {activeListMarketOptions.map((option, index) => (
-                      <div className={`marketOption ${index === 0 ? 'best' : ''}`} key={option.market_name}>
-                        <div>
-                          <strong>{index === 0 ? '🏆 ' : ''}{option.market_name}</strong>
-                          <span>{option.priced_item_count} de {option.item_count} itens com preço conhecido • {option.coverage_pct}%</span>
-                        </div>
-                        <b>{money(option.estimated_total)}</b>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="manualAdd">
-                <h3>Adicionar item manual</h3>
-                <input list="products" value={productName} onChange={event => setProductName(event.target.value)} placeholder="Produto" />
-                <datalist id="products">
-                  {products.map(product => (
-                    <option key={product.id} value={product.name}>{product.name} • {money(product.last_price || product.avg_price)}</option>
-                  ))}
-                </datalist>
-                <div className="threeFields">
-                  <input type="number" min="0.01" step="0.01" value={qty} onChange={event => setQty(Number(event.target.value))} />
-                  <input value={unit} onChange={event => setUnit(event.target.value)} />
-                  <input type="number" min="0" step="0.01" value={price} onChange={event => setPrice(Number(event.target.value))} placeholder="Preço opcional" />
-                </div>
-                <button onClick={addItem}><Plus size={18} /> Adicionar</button>
-              </div>
-
-              <ItemList items={items} products={products} onToggle={toggleItem} onRemove={removeItem} onQuantityChange={updateItemQuantity} />
-            </section>
-
-            <section className="card wide">
-              <h2>Produtos do histórico</h2>
-              <ProductPicker products={filteredProducts} search={productSearch} onSearch={setProductSearch} onAdd={addProductFromHistory} />
-            </section>
+            </details>
           </section>
         )}
 
