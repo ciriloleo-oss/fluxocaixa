@@ -1255,7 +1255,7 @@ function App() {
 
                 <section className="card wide quickAddCard">
                   <h2>Adicionar produto</h2>
-                  <p className="muted">A busca mostra primeiro seus produtos e histórico. Se precisar, use a busca online para cadastrar produto sem preço.</p>
+                  <p className="muted">A busca mostra primeiro seus produtos e histórico. Se precisar, consulta o catálogo Brasil para cadastrar produto sem preço.</p>
 
                   <div className="quickAddRow">
                     <input
@@ -1271,7 +1271,7 @@ function App() {
                     />
                     <button type="button" onClick={addItem}><Plus size={18} /> Adicionar texto</button>
                     <button type="button" onClick={searchProductsOnline} disabled={searchingProducts || catalogSearch.trim().length < 2}>
-                      <Search size={18} /> {searchingProducts ? 'Buscando...' : 'Buscar online'}
+                      <Search size={18} /> {searchingProducts ? 'Buscando...' : 'Buscar catálogo BR'}
                     </button>
                   </div>
 
@@ -1279,7 +1279,7 @@ function App() {
                     {mergedCatalogResults.map(result => (
                       <button className="catalogResult" key={`${result.source}-${result.barcode || result.name}`} onClick={() => addCatalogResultToList(result)}>
                         <strong>{result.name}</strong>
-                        <span>{result.brand ? `${result.brand} • ` : ''}{result.category || 'Produto'} • {result.unit || 'un'} • {result.source || 'catálogo'}</span>
+                        <span>{result.brand ? `${result.brand} • ` : ''}{result.category || 'Produto'} • {result.unit || 'un'} • {sourceLabel(result.source)}</span>
                       </button>
                     ))}
                     {catalogSearch.trim() && mergedCatalogResults.length === 0 && !searchingProducts && (
@@ -1610,6 +1610,19 @@ function App() {
       </main>
     </div>
   );
+}
+
+
+function sourceLabel(source?: string | null) {
+  const labels: Record<string, string> = {
+    historico: 'histórico',
+    'catalogo-local': 'catálogo local',
+    'catalogo-brasil': 'catálogo Brasil',
+    'open-food-facts-br': 'Open Food Facts BR',
+    manual: 'manual'
+  };
+
+  return labels[source || ''] || source || 'catálogo';
 }
 
 function pageTitle(page: string) {
