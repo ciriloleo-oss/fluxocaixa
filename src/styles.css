@@ -1839,3 +1839,142 @@ textarea,
     border-radius: 16px;
   }
 }
+
+/* V9.1 - Compra rápida */
+.quickShoppingCard {
+  display: grid;
+  gap: 18px;
+}
+
+.quickShoppingHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.quickShoppingHeader h2 {
+  margin-bottom: 6px;
+}
+
+.quickShelf {
+  display: grid;
+  gap: 10px;
+}
+
+.quickShelfTitle {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quickShelfTitle strong {
+  font-size: 16px;
+}
+
+.quickShelfTitle span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.quickChipScroller {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scroll-snap-type: x proximity;
+}
+
+.quickChipScroller::-webkit-scrollbar {
+  height: 5px;
+}
+
+.quickChipScroller::-webkit-scrollbar-thumb {
+  background: rgba(47, 125, 50, 0.24);
+  border-radius: 999px;
+}
+
+.quickProductChip {
+  flex: 0 0 auto;
+  min-height: 48px;
+  max-width: 220px;
+  border-radius: 999px;
+  padding: 11px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  scroll-snap-align: start;
+}
+
+.quickProductChip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quickProductChip:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.buyAgainBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.buyAgainList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.buyAgainList button {
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  min-height: 72px;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.buyAgainList button:hover {
+  background: var(--soft);
+  color: var(--accent-dark);
+  border-color: var(--accent);
+}
+
+.buyAgainList span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 860px) {
+  .quickShoppingHeader,
+  .quickShelfTitle {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quickShelfTitle span {
+    text-align: left;
+  }
+
+  .quickShoppingHeader button {
+    width: 100%;
+  }
+
+  .buyAgainList {
+    grid-template-columns: 1fr;
+  }
+
+  .quickProductChip {
+    max-width: 78vw;
+  }
+}

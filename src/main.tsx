@@ -460,7 +460,7 @@ function App() {
     setOnlineResults(data?.results || []);
   }
 
-  async function addCatalogResultToList(result: CatalogSearchResult) {
+  async function addCatalogResultToList(result: CatalogSearchResult, quantity = 1, silent = false) {
     const list = await getOrCreateActiveList();
     if (!list) return;
 
@@ -483,23 +483,85 @@ function App() {
       product_id: product?.id || null
     }, { onConflict: 'name' });
 
-    const { error } = await supabase.from('shopping_list_items').insert({
-      list_id: list.id,
-      product_id: product?.id || null,
-      product_name: name,
-      quantity: 1,
-      unit: unitValue,
-      estimated_unit_price: Number(product?.last_price || product?.avg_price || 0),
-      checked: false
-    });
+    const existingItem = items.find(item => item.product_name === name && item.unit === unitValue && !item.checked);
+
+    let error = null;
+
+    if (existingItem) {
+      const response = await supabase
+        .from('shopping_list_items')
+        .update({ quantity: Number(existingItem.quantity || 0) + Number(quantity || 1) })
+        .eq('id', existingItem.id);
+      error = response.error;
+    } else {
+      const response = await supabase.from('shopping_list_items').insert({
+        list_id: list.id,
+        product_id: product?.id || null,
+        product_name: name,
+        quantity: Number(quantity || 1),
+        unit: unitValue,
+        estimated_unit_price: Number(product?.last_price || product?.avg_price || 0),
+        checked: false
+      });
+      error = response.error;
+    }
 
     if (error) {
       alert(`Erro ao adicionar produto: ${error.message}`);
       return;
     }
 
+    if (!silent) {
+      setCatalogSearch('');
+      setProductName('');
+    }
+
     await loadItems(list.id);
     await refreshListTotals();
+  }
+
+  async function addManyCatalogResults(results: CatalogSearchResult[]) {
+    if (results.length === 0) return;
+
+    for (const result of results) {
+      await addCatalogResultToList(result, 1, true);
+    }
+
+    setCatalogSearch('');
+    setProductName('');
+  }
+
+  async function buyAgain(group: { label: string; items: PurchaseItem[] }) {
+    if (group.items.length === 0) return;
+
+    const ok = items.length > 0
+      ? confirm(`Adicionar os ${group.items.length} item(ns) de "${group.label}" à lista atual?`)
+      : true;
+
+    if (!ok) return;
+
+    const uniqueItems = Array.from(
+      group.items.reduce((map, purchase) => {
+        const key = `${purchase.product_name}|${purchase.unit || 'un'}`;
+        const current = map.get(key) || {
+          name: purchase.product_name,
+          unit: purchase.unit || 'un',
+          quantity: 0,
+          category: inferCategory(purchase.product_name),
+          source: 'comprar-novamente'
+        } as CatalogSearchResult & { quantity: number };
+
+        current.quantity += Number(purchase.quantity || 1);
+        map.set(key, current);
+        return map;
+      }, new Map<string, CatalogSearchResult & { quantity: number }>()).values()
+    );
+
+    for (const item of uniqueItems) {
+      await addCatalogResultToList(item, item.quantity || 1, true);
+    }
+
+    setShoppingMode('planejar');
   }
 
   async function createPurchase(name = newListName) {
@@ -1147,6 +1209,75 @@ function App() {
     return Array.from(map.values()).slice(0, 24);
   }, [localCatalogMatches, onlineResults]);
 
+  const favoriteQuickAdds = useMemo(() => {
+    const favoriteIds = new Set(favoriteProducts.map(favorite => favorite.product_id));
+
+    const fromFavorites = products
+      .filter(product => favoriteIds.has(product.id))
+      .slice(0, 12)
+      .map(product => ({
+        name: product.name,
+        category: product.category || inferCategory(product.name),
+        unit: product.default_unit || 'un',
+        source: 'favorito'
+      }));
+
+    if (fromFavorites.length > 0) return fromFavorites;
+
+    return recurringInsights.slice(0, 12).map(item => ({
+      name: item.product_name,
+      category: inferCategory(item.product_name),
+      unit: item.unit || 'un',
+      source: 'mais-comprado'
+    }));
+  }, [favoriteProducts, products, recurringInsights]);
+
+  const recentQuickAdds = useMemo(() => {
+    const map = new Map<string, CatalogSearchResult>();
+
+    for (const purchase of purchases) {
+      const name = normalizeName(purchase.product_name);
+      if (!name || map.has(name)) continue;
+
+      map.set(name, {
+        name,
+        category: inferCategory(name),
+        unit: purchase.unit || 'un',
+        source: 'recente'
+      });
+
+      if (map.size >= 12) break;
+    }
+
+    return Array.from(map.values());
+  }, [purchases]);
+
+  const weeklySuggestions = useMemo(() => {
+    return recurringInsights.slice(0, 8).map(item => ({
+      name: item.product_name,
+      category: inferCategory(item.product_name),
+      unit: item.unit || 'un',
+      source: 'sugestao-semana'
+    }));
+  }, [recurringInsights]);
+
+  const buyAgainGroups = useMemo(() => {
+    const map = new Map<string, { label: string; date: string; items: PurchaseItem[] }>();
+
+    for (const purchase of purchases) {
+      const key = `${purchase.purchase_date}|${purchase.store_name || 'Mercado'}`;
+      const dateLabel = formatDate(purchase.purchase_date);
+      const label = `${purchase.store_name || 'Mercado'} • ${dateLabel}`;
+      const current = map.get(key) || { label, date: purchase.purchase_date, items: [] };
+      current.items.push(purchase);
+      map.set(key, current);
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5);
+  }, [purchases]);
+
   return (
     <div className="mobileAppShell">
       <header className="appTopBar">
@@ -1249,6 +1380,61 @@ function App() {
                     <Metric label="Estimativa" value={money(predictedTotal)} note="Com preços conhecidos" />
                     <Metric label="Melhor mercado" value={bestActiveMarket?.market_name || '-'} note={bestActiveMarket ? `${money(bestActiveMarket.estimated_total)} • ${bestActiveMarket.coverage_pct}% coberto` : 'Sem dados suficientes'} />
                   </div>
+                </section>
+
+                <section className="card wide quickShoppingCard">
+                  <div className="quickShoppingHeader">
+                    <div>
+                      <p className="eyebrow">Compra rápida</p>
+                      <h2>Monte a lista em poucos toques</h2>
+                      <p className="muted">Use sugestões, favoritos e produtos recentes antes de pesquisar manualmente.</p>
+                    </div>
+                    {weeklySuggestions.length > 0 && (
+                      <button type="button" onClick={() => addManyCatalogResults(weeklySuggestions)}>
+                        <Plus size={16} /> Adicionar sugestão
+                      </button>
+                    )}
+                  </div>
+
+                  {weeklySuggestions.length > 0 && (
+                    <QuickShelf
+                      title="Sugestão da semana"
+                      note="Baseada nos produtos mais recorrentes do seu histórico."
+                      items={weeklySuggestions}
+                      onAdd={item => addCatalogResultToList(item)}
+                    />
+                  )}
+
+                  <QuickShelf
+                    title={favoriteProducts.length > 0 ? 'Favoritos' : 'Mais comprados'}
+                    note={favoriteProducts.length > 0 ? 'Produtos marcados como favoritos.' : 'Enquanto você não marca favoritos, uso os mais recorrentes.'}
+                    items={favoriteQuickAdds}
+                    onAdd={item => addCatalogResultToList(item)}
+                  />
+
+                  <QuickShelf
+                    title="Comprados recentemente"
+                    note="Atalhos gerados pelas últimas NFC-e e registros manuais."
+                    items={recentQuickAdds}
+                    onAdd={item => addCatalogResultToList(item)}
+                  />
+
+                  {buyAgainGroups.length > 0 && (
+                    <div className="buyAgainBlock">
+                      <div className="quickShelfTitle">
+                        <strong>Comprar novamente</strong>
+                        <span>Repete itens de uma compra anterior na lista atual.</span>
+                      </div>
+                      <div className="buyAgainList">
+                        {buyAgainGroups.map(group => (
+                          <button type="button" key={group.label} onClick={() => buyAgain(group)}>
+                            <strong>{group.label}</strong>
+                            <span>{group.items.length} item(ns)</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </section>
 
                 <section className="card wide quickAddCard">
@@ -1966,6 +2152,43 @@ function MiniRows({ rows, empty }: { rows: { title: string; note: string }[]; em
         </div>
       ))}
       {rows.length === 0 && <p className="empty">{empty}</p>}
+    </div>
+  );
+}
+
+
+function QuickShelf({
+  title,
+  note,
+  items,
+  onAdd
+}: {
+  title: string;
+  note: string;
+  items: CatalogSearchResult[];
+  onAdd: (item: CatalogSearchResult) => void;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="quickShelf">
+      <div className="quickShelfTitle">
+        <strong>{title}</strong>
+        <span>{note}</span>
+      </div>
+      <div className="quickChipScroller">
+        {items.map(item => (
+          <button
+            type="button"
+            className="quickProductChip"
+            key={`${title}-${item.source}-${item.barcode || item.name}`}
+            onClick={() => onAdd(item)}
+          >
+            <Plus size={14} />
+            <span>{item.name}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
