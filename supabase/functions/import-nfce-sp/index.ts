@@ -318,6 +318,28 @@ Deno.serve(async req => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const authHeader = req.headers.get('Authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  let authenticatedUserId: string | null = null;
+  let authenticatedHouseholdId: string | null = null;
+
+  if (token) {
+    const { data: authData } = await supabase.auth.getUser(token);
+    authenticatedUserId = authData.user?.id || null;
+
+    if (authenticatedUserId) {
+      const { data: member } = await supabase
+        .from('household_members')
+        .select('household_id')
+        .eq('user_id', authenticatedUserId)
+        .limit(1)
+        .maybeSingle();
+
+      authenticatedHouseholdId = member?.household_id || null;
+    }
+  }
+
   const body = await req.json().catch(() => ({}));
 
   const couponImportId = body.coupon_import_id as string | undefined;
@@ -345,6 +367,8 @@ Deno.serve(async req => {
 
   const accessKey = extractAccessKey(qrUrl);
   const issuerCnpj = extractIssuerCnpj(qrUrl);
+  const effectiveHouseholdId = couponRecord?.household_id || authenticatedHouseholdId || null;
+  const effectiveUserId = couponRecord?.user_id || authenticatedUserId || null;
 
   try {
     if (couponImportId) {
@@ -451,6 +475,8 @@ Deno.serve(async req => {
         purchase_date: new Date().toISOString().slice(0, 10),
         source: 'nfce-sp',
         coupon_import_id: couponImportId || null,
+        household_id: effectiveHouseholdId,
+        user_id: effectiveUserId,
       });
 
       if (purchaseError) {

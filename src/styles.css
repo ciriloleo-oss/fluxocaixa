@@ -1978,3 +1978,101 @@ textarea,
     max-width: 78vw;
   }
 }
+
+/* V9.2 - Auth e casa compartilhada */
+.authShell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top left, rgba(47, 125, 50, 0.18), transparent 34%), var(--bg);
+}
+
+.authCard {
+  width: min(440px, 100%);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 32px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.authLogo {
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 20px !important;
+  margin-bottom: 18px;
+}
+
+.authCard h1 {
+  font-size: clamp(30px, 7vw, 44px);
+  margin-bottom: 10px;
+}
+
+.authCard button {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.ghostButton {
+  background: transparent !important;
+  color: var(--accent-dark) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.accountCard {
+  background: linear-gradient(135deg, #ffffff, #f6fbf3);
+}
+
+.householdGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px;
+}
+
+.memberList {
+  display: grid;
+  gap: 8px;
+}
+
+.memberRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.memberRow svg {
+  color: var(--accent-dark);
+  flex: 0 0 auto;
+}
+
+.memberRow strong,
+.memberRow span {
+  display: block;
+}
+
+.memberRow span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 900;
+}
+
+.householdInvite {
+  align-items: stretch;
+}
+
+@media (max-width: 860px) {
+  .householdGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .authShell {
+    align-items: start;
+    padding-top: 36px;
+  }
+}

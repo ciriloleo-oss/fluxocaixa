@@ -11,6 +11,7 @@ import {
   Copy,
   ListChecks,
   ListPlus,
+  LogOut,
   Minus,
   PackageSearch,
   Plus,
@@ -20,7 +21,9 @@ import {
   ShoppingCart,
   Store,
   Tag,
-  Trash2
+  Trash2,
+  UserPlus,
+  Users
 } from 'lucide-react';
 import './styles.css';
 
@@ -166,6 +169,21 @@ type FavoriteProduct = {
   created_at: string;
 };
 
+type HouseholdInfo = {
+  household_id: string;
+  household_name: string;
+  role: string;
+};
+
+type HouseholdMember = {
+  id: string;
+  role: string;
+  profiles?: {
+    email: string | null;
+    full_name: string | null;
+  } | null;
+};
+
 
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -301,10 +319,48 @@ function App() {
   const [scanMessage, setScanMessage] = useState('');
   const [importingId, setImportingId] = useState<string | null>(null);
 
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authEmail, setAuthEmail] = useState('cirilo.leo@gmail.com');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [household, setHousehold] = useState<HouseholdInfo | null>(null);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [memberEmail, setMemberEmail] = useState('');
+  const [householdMessage, setHouseholdMessage] = useState('');
+
   useEffect(() => {
-    loadAll();
-    loadDuplicateCandidates();
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user || null);
+      setAuthReady(true);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setAuthReady(true);
+    });
+
+    return () => authListener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+
+    if (user) {
+      bootstrapUserWorkspace();
+    } else {
+      setProducts([]);
+      setLists([]);
+      setActiveList(null);
+      setItems([]);
+      setCoupons([]);
+      setPurchases([]);
+      setHousehold(null);
+      setHouseholdMembers([]);
+    }
+  }, [authReady, user?.id]);
 
   useEffect(() => {
     if (activeList) {
@@ -314,7 +370,85 @@ function App() {
     }
   }, [activeList?.id]);
 
+  async function bootstrapUserWorkspace() {
+    const { error: ensureError } = await supabase.rpc('ensure_user_household');
+    if (ensureError) {
+      setHouseholdMessage(`Erro ao preparar usuário: ${ensureError.message}`);
+      return;
+    }
+
+    await supabase.rpc('claim_unassigned_household_data');
+    await loadHousehold();
+    await loadAll();
+    await loadDuplicateCandidates();
+  }
+
+  async function loadHousehold() {
+    const { data, error } = await supabase.rpc('get_my_household');
+
+    if (!error && data && data.length > 0) {
+      setHousehold(data[0]);
+
+      const { data: members } = await supabase
+        .from('household_members')
+        .select('id, role, profiles(email, full_name)')
+        .eq('household_id', data[0].household_id)
+        .order('created_at');
+
+      setHouseholdMembers((members || []) as HouseholdMember[]);
+    }
+  }
+
+  async function handleAuthSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage('');
+
+    const credentials = {
+      email: authEmail.trim().toLowerCase(),
+      password: authPassword,
+    };
+
+    const { error } = authMode === 'login'
+      ? await supabase.auth.signInWithPassword(credentials)
+      : await supabase.auth.signUp(credentials);
+
+    setAuthLoading(false);
+
+    if (error) {
+      setAuthMessage(error.message);
+      return;
+    }
+
+    setAuthMessage(authMode === 'login' ? 'Login realizado.' : 'Cadastro criado. Verifique seu e-mail se a confirmação estiver ativa.');
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  async function addMemberToHousehold() {
+    const email = memberEmail.trim().toLowerCase();
+    if (!email) return;
+
+    setHouseholdMessage('Adicionando usuário ao grupo...');
+    const { error } = await supabase.rpc('add_household_member_by_email', {
+      p_email: email,
+    });
+
+    if (error) {
+      setHouseholdMessage(error.message);
+      return;
+    }
+
+    setMemberEmail('');
+    setHouseholdMessage('Usuário adicionado ao grupo. Se ele ainda não tiver cadastro, crie o login primeiro e repita este passo.');
+    await loadHousehold();
+  }
+
   async function loadAll() {
+    if (!user) return;
+
     const [productsResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse, recurringResponse, trendsResponse, favoritesResponse] = await Promise.all([
       supabase.from('product_price_summary').select('*').order('name'),
       supabase.from('shopping_lists').select('*').order('created_at', { ascending: false }),
@@ -1278,13 +1412,41 @@ function App() {
       .slice(0, 5);
   }, [purchases]);
 
+  if (!authReady) {
+    return (
+      <div className="authShell">
+        <div className="authCard">
+          <div className="appLogo authLogo">CI</div>
+          <h1>Carregando...</h1>
+          <p>Preparando sua sessão.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <AuthScreen
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        email={authEmail}
+        setEmail={setAuthEmail}
+        password={authPassword}
+        setPassword={setAuthPassword}
+        message={authMessage}
+        loading={authLoading}
+        onSubmit={handleAuthSubmit}
+      />
+    );
+  }
+
   return (
     <div className="mobileAppShell">
       <header className="appTopBar">
         <div className="appLogo">CI</div>
         <div>
           <strong>Compra Inteligente</strong>
-          <span>{items.length} item(ns) • {money(predictedTotal)} previsto</span>
+          <span>{household?.household_name || 'Minha casa'} • {items.length} item(ns) • {money(predictedTotal)} previsto</span>
         </div>
       </header>
 
@@ -1534,6 +1696,43 @@ function App() {
 
         {page === 'produtos' && (
           <section className="pageGrid">
+            <section className="card wide accountCard">
+              <div className="cardTop">
+                <div>
+                  <p className="eyebrow">Conta e família</p>
+                  <h2>{household?.household_name || 'Minha casa'}</h2>
+                  <p className="muted">{user.email} • dados compartilhados com membros deste grupo.</p>
+                </div>
+                <button type="button" onClick={signOut}><LogOut size={16} /> Sair</button>
+              </div>
+
+              <div className="householdGrid">
+                <div>
+                  <h3>Membros</h3>
+                  <div className="memberList">
+                    {householdMembers.map(member => (
+                      <div className="memberRow" key={member.id}>
+                        <Users size={16} />
+                        <div>
+                          <strong>{member.profiles?.full_name || member.profiles?.email || 'Usuário'}</strong>
+                          <span>{member.role}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3>Compartilhar lista</h3>
+                  <p className="muted">Adicione outro login ao mesmo grupo para compartilhar lista, cupons e histórico.</p>
+                  <div className="quickAddRow householdInvite">
+                    <input value={memberEmail} onChange={event => setMemberEmail(event.target.value)} placeholder="email da pessoa" />
+                    <button type="button" onClick={addMemberToHousehold}><UserPlus size={16} /> Adicionar</button>
+                  </div>
+                  {householdMessage && <p className="notice">{householdMessage}</p>}
+                </div>
+              </div>
+            </section>
             <section className="card wide">
               <div className="cardTop">
                 <div>
@@ -1839,6 +2038,57 @@ function App() {
   );
 }
 
+
+function AuthScreen({
+  authMode,
+  setAuthMode,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  message,
+  loading,
+  onSubmit
+}: {
+  authMode: 'login' | 'signup';
+  setAuthMode: (value: 'login' | 'signup') => void;
+  email: string;
+  setEmail: (value: string) => void;
+  password: string;
+  setPassword: (value: string) => void;
+  message: string;
+  loading: boolean;
+  onSubmit: (event: React.FormEvent) => void;
+}) {
+  return (
+    <div className="authShell">
+      <form className="authCard" onSubmit={onSubmit}>
+        <div className="appLogo authLogo">CI</div>
+        <p className="eyebrow">Compra Inteligente</p>
+        <h1>{authMode === 'login' ? 'Entrar na sua lista' : 'Criar acesso'}</h1>
+        <p className="muted">Use seu e-mail para separar seus dados e compartilhar a casa com outra pessoa depois.</p>
+
+        <label className="fieldLabel">E-mail</label>
+        <input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="seu@email.com" required />
+
+        <label className="fieldLabel">Senha</label>
+        <input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Sua senha" required minLength={6} />
+
+        <button type="submit" disabled={loading}>{loading ? 'Aguarde...' : authMode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+
+        <button
+          type="button"
+          className="ghostButton"
+          onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+        >
+          {authMode === 'login' ? 'Criar uma conta' : 'Já tenho conta'}
+        </button>
+
+        {message && <p className="notice">{message}</p>}
+      </form>
+    </div>
+  );
+}
 
 function sourceLabel(source?: string | null) {
   const labels: Record<string, string> = {
