@@ -370,14 +370,45 @@ Deno.serve(async req => {
   const effectiveHouseholdId = couponRecord?.household_id || authenticatedHouseholdId || null;
   const effectiveUserId = couponRecord?.user_id || authenticatedUserId || null;
 
+  if (!effectiveUserId || !effectiveHouseholdId) {
+    return jsonResponse(
+      { error: 'Usuário/casa não identificados. Faça login novamente antes de importar o cupom.' },
+      401
+    );
+  }
+
+  const { data: membership } = await supabase
+    .from('household_members')
+    .select('id')
+    .eq('user_id', authenticatedUserId || effectiveUserId)
+    .eq('household_id', effectiveHouseholdId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!membership && authenticatedUserId) {
+    return jsonResponse(
+      { error: 'Este cupom pertence a outra casa ou o usuário não tem permissão para importá-lo.' },
+      403
+    );
+  }
+
   try {
     if (couponImportId) {
+      // Importação idempotente: reimportar o mesmo cupom substitui os itens antigos do próprio cupom,
+      // evitando duplicidade e garantindo que o escopo siga coupon_imports.user_id/household_id.
+      await supabase
+        .from('purchase_items')
+        .delete()
+        .eq('coupon_import_id', couponImportId);
+
       await supabase
         .from('coupon_imports')
         .update({
           status: 'processing',
           error_message: null,
           access_key: accessKey,
+          user_id: effectiveUserId,
+          household_id: effectiveHouseholdId,
         })
         .eq('id', couponImportId);
     }
@@ -494,6 +525,8 @@ Deno.serve(async req => {
           processed_at: new Date().toISOString(),
           imported_items: importedCount,
           store_name: detectedStoreName,
+          user_id: effectiveUserId,
+          household_id: effectiveHouseholdId,
           raw_payload: {
             access_key: accessKey,
             issuer_cnpj: issuerCnpj,
@@ -504,6 +537,10 @@ Deno.serve(async req => {
           error_message: null,
         })
         .eq('id', couponImportId);
+    }
+
+    if (couponImportId) {
+      await supabase.rpc('repair_purchase_item_scope_from_coupons');
     }
 
     return jsonResponse({
