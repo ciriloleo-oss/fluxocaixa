@@ -1181,6 +1181,32 @@ function App() {
     await loadAll();
   }
 
+
+  async function removeCoupon(coupon: CouponImport) {
+    const importedCount = Number(coupon.imported_items || 0);
+    const warning = importedCount > 0
+      ? `Este cupom possui ${importedCount} item(ns) importado(s). Remover o cupom também apagará esses lançamentos do histórico. Deseja continuar?`
+      : 'Remover este cupom pendente?';
+
+    if (!confirm(warning)) return;
+
+    const { data, error } = await supabase.rpc('delete_coupon_import', {
+      p_coupon_id: coupon.id
+    });
+
+    if (error) {
+      alert(`Erro ao remover cupom: ${error.message}`);
+      return;
+    }
+
+    const deletedItems = Number(data?.deleted_items || 0);
+    alert(deletedItems > 0
+      ? `Cupom removido. ${deletedItems} lançamento(s) vinculado(s) também foram apagados.`
+      : 'Cupom removido com sucesso.');
+
+    await loadAll();
+  }
+
   const predictedTotal = useMemo(() => {
     return items.reduce((total, item) => total + Number(item.quantity || 0) * Number(item.estimated_unit_price || 0), 0);
   }, [items]);
@@ -2048,9 +2074,14 @@ function App() {
                       <span className="couponUrl" title={coupon.qr_url}>{coupon.qr_url}</span>
                     </div>
 
-                    <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id || coupon.status === 'imported'}>
-                      {importingId === coupon.id ? 'Importando...' : coupon.status === 'imported' ? 'Importado' : 'Importar'}
-                    </button>
+                    <div className="couponActions">
+                      <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id || coupon.status === 'imported'}>
+                        {importingId === coupon.id ? 'Importando...' : coupon.status === 'imported' ? 'Importado' : 'Importar'}
+                      </button>
+                      <button type="button" className="dangerButton" onClick={() => removeCoupon(coupon)} disabled={importingId === coupon.id}>
+                        <Trash2 size={16} /> Remover
+                      </button>
+                    </div>
                   </div>
                 ))}
 

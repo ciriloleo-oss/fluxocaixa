@@ -2242,3 +2242,39 @@ textarea,
     grid-column: 1 / -1;
   }
 }
+
+
+/* V9.2.4 - remoção segura de cupons */
+.couponActions {
+  display: grid;
+  gap: 8px;
+  min-width: 126px;
+}
+
+.dangerButton {
+  background: #fff1f1;
+  color: #a62020;
+}
+
+.dangerButton:hover {
+  background: #b42323;
+  color: #fff;
+}
+
+@media (max-width: 860px) {
+  .couponActions {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .couponActions button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .couponActions {
+    grid-template-columns: 1fr;
+  }
+}
