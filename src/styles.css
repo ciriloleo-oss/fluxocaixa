@@ -2138,3 +2138,107 @@ textarea,
   .sectionHeaderInline { align-items: stretch; flex-direction: column; }
   .sectionHeaderInline button { width: 100%; }
 }
+
+/* V9.2.3 - Scanner NFC-e otimizado para Android */
+.scannerAndroid {
+  display: grid;
+  gap: 12px;
+}
+
+.scannerViewport {
+  position: relative;
+  width: 100%;
+  min-height: 230px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: #101410;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.scannerViewport video {
+  display: block;
+  width: 100%;
+  height: min(58vh, 430px);
+  min-height: 230px;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+
+.scannerViewport:not(.isRunning) video {
+  opacity: 0.18;
+}
+
+.scannerGuide {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.scannerGuide::before {
+  content: "";
+  width: min(68vw, 270px);
+  aspect-ratio: 1;
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  border-radius: 26px;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.32);
+}
+
+.scannerGuide span {
+  position: absolute;
+  width: min(58vw, 230px);
+  height: 2px;
+  background: rgba(117, 211, 109, 0.92);
+  box-shadow: 0 0 16px rgba(117, 211, 109, 0.9);
+}
+
+.scannerMessage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.scannerActions {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr;
+  gap: 8px;
+}
+
+.scannerActions button {
+  min-height: 50px;
+  padding: 11px 10px;
+}
+
+.scannerActions .scannerPrimary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.scannerFileInput {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@media (max-width: 620px) {
+  .scannerViewport,
+  .scannerViewport video {
+    min-height: 280px;
+    height: min(54vh, 420px);
+  }
+
+  .scannerActions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .scannerActions .scannerPrimary {
+    grid-column: 1 / -1;
+  }
+}

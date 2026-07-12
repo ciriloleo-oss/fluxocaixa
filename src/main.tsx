@@ -6,6 +6,8 @@ import { supabase } from './lib/supabase';
 import {
   BarChart3,
   Camera,
+  Image,
+  SwitchCamera,
   Check,
   Circle,
   Copy,
@@ -2019,7 +2021,7 @@ function App() {
           <section className="pageGrid">
             <section className="card wide">
               <h2>Scanner NFC-e</h2>
-              <p className="muted">Cole o link do QR Code ou use a câmera. Depois clique em Importar.</p>
+              <p className="muted">Aponte a câmera traseira para o QR Code. Se o foco não funcionar, use uma foto do cupom ou cole o link manualmente.</p>
               <QrScanner onDetected={value => { setQrUrl(value); saveQrLink(value); }} />
               <textarea value={qrUrl} onChange={event => setQrUrl(event.target.value)} placeholder="Cole aqui a URL do QR Code do cupom NFC-e" />
               <button onClick={() => saveQrLink(qrUrl)}><Save size={18} /> Salvar QR Code</button>
@@ -2612,38 +2614,178 @@ function ProductPicker({
 
 function QrScanner({ onDetected }: { onDetected: (value: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
+  const readerRef = useRef<BrowserQRCodeReader | null>(null);
   const [running, setRunning] = useState(false);
+  const [readingImage, setReadingImage] = useState(false);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
+  const [scannerMessage, setScannerMessage] = useState('Posicione o QR Code dentro do quadro.');
 
-  async function start() {
-    const reader = new BrowserQRCodeReader();
-
-    try {
-      setRunning(true);
-      controlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current!, result => {
-        if (result) {
-          onDetected(result.getText());
-          controlsRef.current?.stop();
-          setRunning(false);
-        }
-      });
-    } catch {
-      setRunning(false);
-      alert('Não consegui abrir a câmera. Verifique as permissões do navegador.');
-    }
-  }
+  useEffect(() => {
+    return () => {
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+    };
+  }, []);
 
   function stop() {
     controlsRef.current?.stop();
+    controlsRef.current = null;
     setRunning(false);
   }
 
+  async function listCameras() {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+
+    const allDevices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = allDevices.filter(device => device.kind === 'videoinput');
+    setDevices(videoDevices);
+    return videoDevices;
+  }
+
+  function chooseRearCamera(videoDevices: MediaDeviceInfo[]) {
+    const rearPattern = /(back|rear|environment|traseira|camera 0|câmera 0)/i;
+    return videoDevices.find(device => rearPattern.test(device.label)) || videoDevices[videoDevices.length - 1] || null;
+  }
+
+  async function start(preferredDeviceId?: string | null) {
+    stop();
+    setScannerMessage('Abrindo a câmera traseira...');
+
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('A câmera exige acesso por HTTPS ou localhost.');
+      }
+
+      // Uma solicitação inicial libera os rótulos das câmeras em muitos Androids.
+      const permissionStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+      permissionStream.getTracks().forEach(track => track.stop());
+
+      const videoDevices = await listCameras();
+      const selected = preferredDeviceId
+        ? videoDevices.find(device => device.deviceId === preferredDeviceId) || null
+        : chooseRearCamera(videoDevices);
+
+      const constraints: MediaStreamConstraints = {
+        audio: false,
+        video: selected?.deviceId
+          ? {
+              deviceId: { exact: selected.deviceId },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              facingMode: { ideal: 'environment' }
+            }
+          : {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            }
+      };
+
+      const reader = new BrowserQRCodeReader();
+      readerRef.current = reader;
+      setActiveDeviceId(selected?.deviceId || null);
+      setRunning(true);
+      setScannerMessage('Aproxime devagar até o QR ficar nítido.');
+
+      controlsRef.current = await reader.decodeFromConstraints(
+        constraints,
+        videoRef.current!,
+        result => {
+          if (!result) return;
+          const text = result.getText();
+          stop();
+          setScannerMessage('QR Code identificado com sucesso.');
+          onDetected(text);
+        }
+      );
+    } catch (error) {
+      stop();
+      const message = error instanceof Error ? error.message : 'Não consegui abrir a câmera.';
+      setScannerMessage(
+        /permission|notallowed|denied/i.test(message)
+          ? 'Permissão da câmera bloqueada. Libere a câmera nas configurações do navegador.'
+          : message
+      );
+    }
+  }
+
+  async function switchCamera() {
+    const videoDevices = devices.length ? devices : await listCameras();
+    if (videoDevices.length < 2) {
+      setScannerMessage('Este aparelho informou apenas uma câmera disponível.');
+      return;
+    }
+
+    const currentIndex = videoDevices.findIndex(device => device.deviceId === activeDeviceId);
+    const next = videoDevices[(currentIndex + 1 + videoDevices.length) % videoDevices.length];
+    await start(next.deviceId);
+  }
+
+  async function readImage(file?: File) {
+    if (!file) return;
+
+    stop();
+    setReadingImage(true);
+    setScannerMessage('Analisando a foto...');
+    const objectUrl = URL.createObjectURL(file);
+
+    try {
+      const reader = new BrowserQRCodeReader();
+      const result = await reader.decodeFromImageUrl(objectUrl);
+      setScannerMessage('QR Code identificado na foto.');
+      onDetected(result.getText());
+    } catch {
+      setScannerMessage('Não encontrei um QR Code legível nessa imagem. Tente uma foto mais próxima e sem reflexo.');
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      setReadingImage(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
   return (
-    <div className="scanner">
-      <video ref={videoRef} />
-      <button onClick={running ? stop : start}>
-        <Camera size={18} /> {running ? 'Parar câmera' : 'Ler QR Code'}
-      </button>
+    <div className="scanner scannerAndroid">
+      <div className={`scannerViewport ${running ? 'isRunning' : ''}`}>
+        <video ref={videoRef} muted playsInline />
+        <div className="scannerGuide" aria-hidden="true">
+          <span />
+        </div>
+      </div>
+
+      <p className="scannerMessage">{scannerMessage}</p>
+
+      <div className="scannerActions">
+        <button type="button" className="scannerPrimary" onClick={() => running ? stop() : start()}>
+          <Camera size={19} /> {running ? 'Parar câmera' : 'Abrir câmera'}
+        </button>
+
+        <button type="button" onClick={switchCamera} disabled={!running || devices.length < 2}>
+          <SwitchCamera size={19} /> Trocar câmera
+        </button>
+
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={readingImage}>
+          <Image size={19} /> {readingImage ? 'Lendo foto...' : 'Ler pela foto'}
+        </button>
+      </div>
+
+      <input
+        ref={fileRef}
+        className="scannerFileInput"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={event => readImage(event.target.files?.[0])}
+      />
     </div>
   );
 }
