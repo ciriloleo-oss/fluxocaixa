@@ -27,7 +27,10 @@ import {
   UserPlus,
   Users,
   Edit3,
-  ShieldCheck
+  ShieldCheck,
+  Ban,
+  GitMerge,
+  Scale
 } from 'lucide-react';
 import './styles.css';
 
@@ -42,6 +45,13 @@ type Product = {
   avg_price: number | null;
 };
 
+
+type ProductAlias = {
+  id: string;
+  product_id: string;
+  alias_name: string;
+  normalized_alias: string | null;
+};
 
 type CatalogSearchResult = {
   name: string;
@@ -141,6 +151,8 @@ type PurchaseItem = {
   purchase_date: string;
   source: string;
   coupon_import_id?: string | null;
+  canonical_product_id?: string | null;
+  canonical_product_name?: string | null;
 };
 
 type RecurringProductInsight = {
@@ -207,7 +219,20 @@ function money(value?: number | null) {
 }
 
 function normalizeName(value: string) {
-  return value.trim().replace(/\s+/g, ' ').toUpperCase();
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\bENERG\b/g, 'ENERGETICO')
+    .replace(/\bREFRI\b/g, 'REFRIGERANTE')
+    .replace(/\bQJO\b/g, 'QUEIJO')
+    .replace(/\bMUSS\b/g, 'MUSSARELA')
+    .replace(/\bINT\b/g, 'INTEGRAL')
+    .replace(/\bTRAD\b/g, 'TRADICIONAL')
+    .replace(/(\d+)\s*(ML|L|G|KG)\b/g, '$1$2')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function formatDate(value?: string | null) {
@@ -280,6 +305,7 @@ function App() {
   const [page, setPage] = useState<'inicio' | 'compras' | 'produtos' | 'ondeComprar' | 'analises' | 'cupons'>('compras');
   const [shoppingMode, setShoppingMode] = useState<'planejar' | 'mercado'>('planejar');
   const [products, setProducts] = useState<Product[]>([]);
+  const [productAliases, setProductAliases] = useState<ProductAlias[]>([]);
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [activeList, setActiveList] = useState<ShoppingList | null>(null);
   const [items, setItems] = useState<ListItem[]>([]);
@@ -495,8 +521,9 @@ function App() {
   async function loadAll() {
     if (!user) return;
 
-    const [productsResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse, recurringResponse, trendsResponse, favoritesResponse] = await Promise.all([
+    const [productsResponse, aliasesResponse, listsResponse, couponsResponse, purchasesResponse, marketPricesResponse, listMarketResponse, monthlyResponse, marketSummaryResponse, recurringResponse, trendsResponse, favoritesResponse] = await Promise.all([
       supabase.from('product_price_summary').select('*').order('name'),
+      supabase.from('product_aliases').select('id, product_id, alias_name, normalized_alias').limit(5000),
       supabase.from('shopping_lists').select('*').order('created_at', { ascending: false }),
       supabase.from('coupon_imports').select('*').order('created_at', { ascending: false }),
       supabase.from('purchase_items').select('*').order('purchase_date', { ascending: false }).limit(500),
@@ -510,6 +537,7 @@ function App() {
     ]);
 
     if (!productsResponse.error) setProducts(productsResponse.data || []);
+    if (!aliasesResponse.error) setProductAliases(aliasesResponse.data || []);
     if (!couponsResponse.error) setCoupons(couponsResponse.data || []);
     if (!purchasesResponse.error) setPurchases(purchasesResponse.data || []);
     if (!marketPricesResponse.error) setMarketPrices(marketPricesResponse.data || []);
@@ -1019,6 +1047,26 @@ function App() {
   }
 
 
+  async function rejectDuplicateCandidate(candidate: any) {
+    const ok = confirm(`Marcar "${candidate.product_a_name}" e "${candidate.product_b_name}" como produtos diferentes?\n\nEsse par não será sugerido novamente.`);
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('reject_product_match', {
+      p_product_a_id: candidate.product_a_id,
+      p_product_b_id: candidate.product_b_id,
+      p_reason: candidate.decision_reason || 'rejeitado na revisão do catálogo'
+    });
+
+    if (error) {
+      alert(`Erro ao rejeitar sugestão: ${error.message}`);
+      return;
+    }
+
+    setDuplicateCandidates(current => current.filter(item =>
+      !(item.product_a_id === candidate.product_a_id && item.product_b_id === candidate.product_b_id)
+    ));
+  }
+
   async function mergeSelectedProducts(masterId = selectedMasterProductId, duplicateId = selectedDuplicateProductId) {
     if (!masterId || !duplicateId || masterId === duplicateId) {
       alert('Selecione um produto principal e um produto duplicado diferente.');
@@ -1239,14 +1287,42 @@ function App() {
     return ['Todas', ...CATEGORY_ORDER.filter(category => categories.has(category)), ...Array.from(categories).filter(category => !CATEGORY_ORDER.includes(category)).sort()];
   }, [products]);
 
+  const aliasProductIdsByQuery = useMemo(() => {
+    const query = normalizeName(productSearch);
+    if (!query) return new Set<string>();
+    return new Set(
+      productAliases
+        .filter(alias => normalizeName(alias.alias_name).includes(query))
+        .map(alias => alias.product_id)
+    );
+  }, [productAliases, productSearch]);
+
   const filteredProducts = useMemo(() => {
     const query = normalizeName(productSearch);
 
     return products
-      .filter(product => !query || product.name.includes(query))
+      .filter(product => !query || normalizeName(product.name).includes(query) || aliasProductIdsByQuery.has(product.id))
       .filter(product => categoryFilter === 'Todas' || (product.category || inferCategory(product.name)) === categoryFilter)
       .slice(0, 120);
-  }, [products, productSearch, categoryFilter]);
+  }, [products, productSearch, categoryFilter, aliasProductIdsByQuery]);
+
+  const productById = useMemo(() => new Map(products.map(product => [product.id, product])), [products]);
+  const aliasToProductId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const alias of productAliases) map.set(normalizeName(alias.alias_name), alias.product_id);
+    for (const product of products) map.set(normalizeName(product.name), product.id);
+    return map;
+  }, [productAliases, products]);
+
+  function canonicalPurchase(purchase: PurchaseItem) {
+    const productId = purchase.product_id || aliasToProductId.get(normalizeName(purchase.product_name)) || null;
+    const product = productId ? productById.get(productId) : undefined;
+    return {
+      productId,
+      productName: product?.name || purchase.canonical_product_name || purchase.product_name,
+      normalizedName: normalizeName(product?.name || purchase.canonical_product_name || purchase.product_name)
+    };
+  }
 
   const visibleLists = lists.filter(list => !list.is_archived);
   const openLists = visibleLists.filter(list => list.status !== 'done');
@@ -1291,17 +1367,21 @@ function App() {
       const purchaseDate = new Date(`${purchase.purchase_date}T12:00:00`);
       if (insightDateRange.start && purchaseDate < insightDateRange.start) return false;
       if (insightDateRange.end && purchaseDate > insightDateRange.end) return false;
-      if (productQuery && !normalizeName(purchase.product_name).includes(productQuery)) return false;
+      const canonical = canonicalPurchase(purchase);
+      const aliasMatches = purchase.product_id
+        ? productAliases.some(alias => alias.product_id === purchase.product_id && normalizeName(alias.alias_name).includes(productQuery))
+        : false;
+      if (productQuery && !canonical.normalizedName.includes(productQuery) && !normalizeName(purchase.product_name).includes(productQuery) && !aliasMatches) return false;
       if (insightMarket !== 'Todos' && (purchase.store_name || 'Sem mercado') !== insightMarket) return false;
       if (insightSource !== 'Todas' && (purchase.source || 'Não informada') !== insightSource) return false;
-      if (insightCategory !== 'Todas' && getProductCategory(purchase.product_name, products) !== insightCategory) return false;
+      if (insightCategory !== 'Todas' && getProductCategory(canonical.productName, products) !== insightCategory) return false;
       return true;
     });
-  }, [purchases, products, insightDateRange, insightProduct, insightMarket, insightSource, insightCategory]);
+  }, [purchases, products, productAliases, aliasToProductId, productById, insightDateRange, insightProduct, insightMarket, insightSource, insightCategory]);
 
   const totalPurchased = purchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
   const insightTotalPurchased = filteredInsightPurchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
-  const insightProductCount = new Set(filteredInsightPurchases.map(item => item.product_name)).size;
+  const insightProductCount = new Set(filteredInsightPurchases.map(item => canonicalPurchase(item).productId || canonicalPurchase(item).normalizedName)).size;
   const insightMarketCount = new Set(filteredInsightPurchases.map(item => item.store_name || 'Sem mercado')).size;
   const insightPurchaseCount = new Set(filteredInsightPurchases.map(item => item.coupon_import_id || `${item.purchase_date}-${item.store_name || 'manual'}`)).size;
   const insightAverageTicket = insightPurchaseCount ? insightTotalPurchased / insightPurchaseCount : 0;
@@ -1325,15 +1405,17 @@ function App() {
     const map = new Map<string, { name: string; total: number; count: number; quantity: number }>();
 
     for (const purchase of filteredInsightPurchases) {
-      const current = map.get(purchase.product_name) || { name: purchase.product_name, total: 0, count: 0, quantity: 0 };
+      const canonical = canonicalPurchase(purchase);
+      const key = canonical.productId || canonical.normalizedName;
+      const current = map.get(key) || { name: canonical.productName, total: 0, count: 0, quantity: 0 };
       current.total += Number(purchase.total_price || 0);
       current.count += 1;
       current.quantity += Number(purchase.quantity || 0);
-      map.set(purchase.product_name, current);
+      map.set(key, current);
     }
 
     return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 8);
-  }, [filteredInsightPurchases]);
+  }, [filteredInsightPurchases, aliasToProductId, productById]);
 
   const insightMonthlyTotals = useMemo(() => {
     const map = new Map<string, number>();
@@ -1942,10 +2024,11 @@ function App() {
             <section className="card wide">
               <div className="cardTop">
                 <div>
-                  <h2>Unificar produtos duplicados</h2>
-                  <p className="muted">Escolha o produto principal e o nome duplicado que deve virar alias.</p>
+                  <p className="eyebrow">V10 • Catálogo Inteligente</p>
+                  <h2>Revisar produtos semelhantes</h2>
+                  <p className="muted">O sistema sugere pares com embalagem compatível. Você decide se são o mesmo produto ou se nunca mais devem aparecer juntos.</p>
                 </div>
-                <button onClick={loadDuplicateCandidates}><RefreshCw size={18} /> Buscar candidatos</button>
+                <button onClick={loadDuplicateCandidates}><RefreshCw size={18} /> Atualizar sugestões</button>
               </div>
 
               <div className="mergeBox">
@@ -1972,22 +2055,52 @@ function App() {
                 <button onClick={() => mergeSelectedProducts()}>Unificar produtos</button>
               </div>
 
-              <h3>Candidatos prováveis</h3>
-              <div className="duplicateCandidates">
+              <div className="catalogReviewHeader">
+                <div>
+                  <h3>Sugestões para revisar</h3>
+                  <p className="muted">Pesos e volumes diferentes são bloqueados automaticamente. Confira principalmente marca, sabor e tipo.</p>
+                </div>
+                <span className="reviewCount">{duplicateCandidates.length} pendente(s)</span>
+              </div>
+
+              <div className="duplicateCandidates smartCatalogCandidates">
                 {duplicateCandidates.map(candidate => (
-                  <div className="duplicateCandidate" key={`${candidate.product_a_id}-${candidate.product_b_id}`}>
-                    <div>
-                      <strong>{candidate.product_a_name}</strong>
-                      <span>{candidate.product_b_name}</span>
-                      <small>Similaridade: {Math.round(Number(candidate.score || 0) * 100)}%</small>
+                  <div className={`duplicateCandidate smartCandidate ${candidate.decision || 'review'}`} key={`${candidate.product_a_id}-${candidate.product_b_id}`}>
+                    <div className="candidateComparison">
+                      <div className="candidateProduct">
+                        <span className="candidateLabel">Produto A</span>
+                        <strong>{candidate.product_a_name}</strong>
+                        {candidate.measure_a && <small><Scale size={13} /> {candidate.measure_a}</small>}
+                      </div>
+                      <div className="candidateLink"><GitMerge size={20} /></div>
+                      <div className="candidateProduct">
+                        <span className="candidateLabel">Produto B</span>
+                        <strong>{candidate.product_b_name}</strong>
+                        {candidate.measure_b && <small><Scale size={13} /> {candidate.measure_b}</small>}
+                      </div>
                     </div>
-                    <div className="duplicateActions">
-                      <button onClick={() => mergeSelectedProducts(candidate.product_a_id, candidate.product_b_id)}>A é principal</button>
-                      <button onClick={() => mergeSelectedProducts(candidate.product_b_id, candidate.product_a_id)}>B é principal</button>
+
+                    <div className="candidateDecision">
+                      <span className={`decisionBadge ${candidate.decision || 'review'}`}>
+                        {candidate.decision === 'strong' ? 'Alta chance de ser o mesmo' : 'Revisão necessária'}
+                      </span>
+                      <small>Similaridade: {Math.round(Number(candidate.score || 0) * 100)}% • {candidate.decision_reason || 'Confira os detalhes'}</small>
+                    </div>
+
+                    <div className="duplicateActions smartActions">
+                      <button className="primaryMerge" onClick={() => mergeSelectedProducts(candidate.product_a_id, candidate.product_b_id)}><GitMerge size={15} /> Usar A como principal</button>
+                      <button className="primaryMerge" onClick={() => mergeSelectedProducts(candidate.product_b_id, candidate.product_a_id)}><GitMerge size={15} /> Usar B como principal</button>
+                      <button className="rejectMatch" onClick={() => rejectDuplicateCandidate(candidate)}><Ban size={15} /> Não são iguais</button>
                     </div>
                   </div>
                 ))}
-                {duplicateCandidates.length === 0 && <p className="empty">Nenhum candidato encontrado ainda.</p>}
+                {duplicateCandidates.length === 0 && (
+                  <div className="catalogEmptyState">
+                    <ShieldCheck size={32} />
+                    <strong>Catálogo revisado</strong>
+                    <span>Não há sugestões pendentes com embalagem compatível.</span>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -2100,6 +2213,7 @@ function App() {
                   <input list="insight-products" value={insightProduct} onChange={event => setInsightProduct(event.target.value)} placeholder="Todos os produtos" />
                   <datalist id="insight-products">
                     {products.map(product => <option key={product.id} value={product.name} />)}
+                    {productAliases.slice(0, 1000).map(alias => <option key={`alias-${alias.id}`} value={alias.alias_name} />)}
                   </datalist>
                 </label>
 
