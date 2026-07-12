@@ -2278,3 +2278,27 @@ textarea,
     grid-template-columns: 1fr;
   }
 }
+
+
+/* V9.2.5 - Insights filtráveis */
+.insightFiltersCard { position: relative; }
+.insightFilterGrid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }
+.insightFilterGrid label,.customDateRange label { display:grid; gap:6px; }
+.insightFilterGrid label > span,.customDateRange label > span { color:var(--muted); font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; }
+.insightFilterGrid input,.insightFilterGrid select,.customDateRange input { margin:0; }
+.customDateRange { display:grid; grid-template-columns:repeat(2,minmax(0,220px)); gap:10px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+.insightMetricGrid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
+.insightMetric { background:#fff; border:1px solid var(--line); border-radius:22px; padding:16px; box-shadow:var(--shadow); min-width:0; }
+.insightMetric.primary { background:linear-gradient(135deg,#102015,#2f7d32); color:#fff; border-color:transparent; }
+.insightMetric small { display:block; color:var(--muted); font-weight:800; }
+.insightMetric.primary small,.insightMetric.primary span { color:#d8ead5; }
+.insightMetric strong { display:block; font-size:clamp(24px,4vw,34px); margin:7px 0; overflow-wrap:anywhere; }
+.insightMetric span { display:block; color:var(--muted); font-size:12px; line-height:1.35; }
+.monthlyInsightList { display:grid; gap:8px; }
+.monthlyInsightRow { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:13px 14px; background:#fbfdf9; border:1px solid var(--line); border-radius:16px; text-transform:capitalize; }
+.monthlyInsightRow strong { color:var(--accent-dark); white-space:nowrap; }
+.insightSummaryText { display:grid; gap:8px; }
+.insightSummaryText p { margin:0; padding:12px 14px; border-radius:16px; background:var(--soft); line-height:1.45; }
+@media(max-width:1050px){.insightFilterGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.insightMetricGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.insightFilterGrid,.insightMetricGrid{grid-template-columns:1fr 1fr}.customDateRange{grid-template-columns:1fr 1fr}.insightMetric.primary{grid-column:1/-1}}
+@media(max-width:430px){.insightFilterGrid,.insightMetricGrid,.customDateRange{grid-template-columns:1fr}.monthlyInsightRow{align-items:flex-start;flex-direction:column;gap:4px}}

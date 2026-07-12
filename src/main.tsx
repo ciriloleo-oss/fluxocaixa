@@ -140,6 +140,7 @@ type PurchaseItem = {
   total_price: number;
   purchase_date: string;
   source: string;
+  coupon_import_id?: string | null;
 };
 
 type RecurringProductInsight = {
@@ -335,6 +336,14 @@ function App() {
   const [householdNameDraft, setHouseholdNameDraft] = useState('');
   const [renamingHousehold, setRenamingHousehold] = useState(false);
   const [householdMessage, setHouseholdMessage] = useState('');
+
+  const [insightPeriod, setInsightPeriod] = useState<'currentMonth' | 'previousMonth' | 'threeMonths' | 'sixMonths' | 'year' | 'custom' | 'all'>('currentMonth');
+  const [insightProduct, setInsightProduct] = useState('');
+  const [insightMarket, setInsightMarket] = useState('Todos');
+  const [insightCategory, setInsightCategory] = useState('Todas');
+  const [insightSource, setInsightSource] = useState('Todas');
+  const [insightStartDate, setInsightStartDate] = useState('');
+  const [insightEndDate, setInsightEndDate] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -1244,12 +1253,64 @@ function App() {
   const doneLists = visibleLists.filter(list => list.status === 'done');
   const importedCoupons = coupons.filter(coupon => coupon.status === 'imported');
   const pendingCoupons = coupons.filter(coupon => coupon.status !== 'imported');
+  const insightMarkets = useMemo(() => {
+    return ['Todos', ...Array.from(new Set(purchases.map(item => item.store_name || 'Sem mercado'))).sort()];
+  }, [purchases]);
+
+  const insightSources = useMemo(() => {
+    return ['Todas', ...Array.from(new Set(purchases.map(item => item.source || 'Não informada'))).sort()];
+  }, [purchases]);
+
+  const insightDateRange = useMemo(() => {
+    const today = new Date();
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    let start: Date | null = null;
+    let rangeEnd: Date | null = end;
+
+    if (insightPeriod === 'currentMonth') start = new Date(today.getFullYear(), today.getMonth(), 1);
+    if (insightPeriod === 'previousMonth') {
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      rangeEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    }
+    if (insightPeriod === 'threeMonths') start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+    if (insightPeriod === 'sixMonths') start = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+    if (insightPeriod === 'year') start = new Date(today.getFullYear(), 0, 1);
+    if (insightPeriod === 'custom') {
+      start = insightStartDate ? new Date(`${insightStartDate}T00:00:00`) : null;
+      rangeEnd = insightEndDate ? new Date(`${insightEndDate}T23:59:59`) : null;
+    }
+    if (insightPeriod === 'all') return { start: null, end: null };
+
+    return { start, end: rangeEnd };
+  }, [insightPeriod, insightStartDate, insightEndDate]);
+
+  const filteredInsightPurchases = useMemo(() => {
+    const productQuery = normalizeName(insightProduct);
+
+    return purchases.filter(purchase => {
+      const purchaseDate = new Date(`${purchase.purchase_date}T12:00:00`);
+      if (insightDateRange.start && purchaseDate < insightDateRange.start) return false;
+      if (insightDateRange.end && purchaseDate > insightDateRange.end) return false;
+      if (productQuery && !normalizeName(purchase.product_name).includes(productQuery)) return false;
+      if (insightMarket !== 'Todos' && (purchase.store_name || 'Sem mercado') !== insightMarket) return false;
+      if (insightSource !== 'Todas' && (purchase.source || 'Não informada') !== insightSource) return false;
+      if (insightCategory !== 'Todas' && getProductCategory(purchase.product_name, products) !== insightCategory) return false;
+      return true;
+    });
+  }, [purchases, products, insightDateRange, insightProduct, insightMarket, insightSource, insightCategory]);
+
   const totalPurchased = purchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
+  const insightTotalPurchased = filteredInsightPurchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
+  const insightProductCount = new Set(filteredInsightPurchases.map(item => item.product_name)).size;
+  const insightMarketCount = new Set(filteredInsightPurchases.map(item => item.store_name || 'Sem mercado')).size;
+  const insightPurchaseCount = new Set(filteredInsightPurchases.map(item => item.coupon_import_id || `${item.purchase_date}-${item.store_name || 'manual'}`)).size;
+  const insightAverageTicket = insightPurchaseCount ? insightTotalPurchased / insightPurchaseCount : 0;
+  const insightAverageItem = filteredInsightPurchases.length ? insightTotalPurchased / filteredInsightPurchases.length : 0;
 
   const marketTotals = useMemo(() => {
     const map = new Map<string, number>();
 
-    for (const purchase of purchases) {
+    for (const purchase of filteredInsightPurchases) {
       const market = purchase.store_name || 'Sem mercado';
       map.set(market, (map.get(market) || 0) + Number(purchase.total_price || 0));
     }
@@ -1258,20 +1319,43 @@ function App() {
       .map(([market, total]) => ({ market, total }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
-  }, [purchases]);
+  }, [filteredInsightPurchases]);
 
   const topPurchasedProducts = useMemo(() => {
-    const map = new Map<string, { name: string; total: number; count: number }>();
+    const map = new Map<string, { name: string; total: number; count: number; quantity: number }>();
 
-    for (const purchase of purchases) {
-      const current = map.get(purchase.product_name) || { name: purchase.product_name, total: 0, count: 0 };
+    for (const purchase of filteredInsightPurchases) {
+      const current = map.get(purchase.product_name) || { name: purchase.product_name, total: 0, count: 0, quantity: 0 };
       current.total += Number(purchase.total_price || 0);
       current.count += 1;
+      current.quantity += Number(purchase.quantity || 0);
       map.set(purchase.product_name, current);
     }
 
     return Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 8);
-  }, [purchases]);
+  }, [filteredInsightPurchases]);
+
+  const insightMonthlyTotals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const purchase of filteredInsightPurchases) {
+      const month = purchase.purchase_date.slice(0, 7);
+      map.set(month, (map.get(month) || 0) + Number(purchase.total_price || 0));
+    }
+    return Array.from(map.entries())
+      .map(([month, total]) => ({ month, total }))
+      .sort((a, b) => b.month.localeCompare(a.month))
+      .slice(0, 12);
+  }, [filteredInsightPurchases]);
+
+  function clearInsightFilters() {
+    setInsightPeriod('currentMonth');
+    setInsightProduct('');
+    setInsightMarket('Todos');
+    setInsightCategory('Todas');
+    setInsightSource('Todas');
+    setInsightStartDate('');
+    setInsightEndDate('');
+  }
 
 
   const activeListMarketOptions = useMemo(() => {
@@ -1987,58 +2071,111 @@ function App() {
         )}
 
         {page === 'analises' && (
-          <section className="pageGrid">
-            <Metric label="Total gasto registrado" value={money(totalPurchased)} note={`${purchases.length} itens comprados`} />
-            <Metric label="Produtos monitorados" value={String(products.length)} note="Com preço médio/último preço" />
-            <Metric label="Compras criadas" value={String(lists.length)} note={`${openLists.length} abertas`} />
-            <Metric label="Produtos recorrentes" value={String(recurringInsights.length)} note={`Lista sugerida ${money(recurringSuggestionTotal)}`} />
-            <Metric label="Alertas de favoritos" value={String(favoritesWithAlert.length)} note="Abaixo do preço desejado" />
+          <section className="pageGrid insightPage">
+            <section className="card wide insightFiltersCard">
+              <div className="cardTop">
+                <div>
+                  <h2>Filtros dos insights</h2>
+                  <p className="muted">Os valores abaixo consideram apenas os filtros selecionados.</p>
+                </div>
+                <button type="button" onClick={clearInsightFilters}><RefreshCw size={16} /> Limpar</button>
+              </div>
+
+              <div className="insightFilterGrid">
+                <label>
+                  <span>Período</span>
+                  <select value={insightPeriod} onChange={event => setInsightPeriod(event.target.value as any)}>
+                    <option value="currentMonth">Mês atual</option>
+                    <option value="previousMonth">Mês anterior</option>
+                    <option value="threeMonths">Últimos 3 meses</option>
+                    <option value="sixMonths">Últimos 6 meses</option>
+                    <option value="year">Ano atual</option>
+                    <option value="custom">Período personalizado</option>
+                    <option value="all">Todo o histórico</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Produto</span>
+                  <input list="insight-products" value={insightProduct} onChange={event => setInsightProduct(event.target.value)} placeholder="Todos os produtos" />
+                  <datalist id="insight-products">
+                    {products.map(product => <option key={product.id} value={product.name} />)}
+                  </datalist>
+                </label>
+
+                <label>
+                  <span>Mercado</span>
+                  <select value={insightMarket} onChange={event => setInsightMarket(event.target.value)}>
+                    {insightMarkets.map(market => <option key={market} value={market}>{market}</option>)}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Categoria</span>
+                  <select value={insightCategory} onChange={event => setInsightCategory(event.target.value)}>
+                    {availableCategories.map(category => <option key={category} value={category}>{category}</option>)}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Origem</span>
+                  <select value={insightSource} onChange={event => setInsightSource(event.target.value)}>
+                    {insightSources.map(source => <option key={source} value={source}>{source}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              {insightPeriod === 'custom' && (
+                <div className="customDateRange">
+                  <label><span>De</span><input type="date" value={insightStartDate} onChange={event => setInsightStartDate(event.target.value)} /></label>
+                  <label><span>Até</span><input type="date" value={insightEndDate} onChange={event => setInsightEndDate(event.target.value)} /></label>
+                </div>
+              )}
+            </section>
+
+            <section className="insightMetricGrid wide">
+              <div className="insightMetric primary"><small>Total gasto</small><strong>{money(insightTotalPurchased)}</strong><span>{insightPurchaseCount} compra(s) no período</span></div>
+              <div className="insightMetric"><small>Ticket médio</small><strong>{money(insightAverageTicket)}</strong><span>Média por compra</span></div>
+              <div className="insightMetric"><small>Itens registrados</small><strong>{filteredInsightPurchases.length}</strong><span>{insightProductCount} produto(s) diferente(s)</span></div>
+              <div className="insightMetric"><small>Mercados</small><strong>{insightMarketCount}</strong><span>{marketTotals[0] ? `Maior gasto: ${marketTotals[0].market}` : 'Sem registros'}</span></div>
+              <div className="insightMetric"><small>Média por item</small><strong>{money(insightAverageItem)}</strong><span>Valor médio das linhas compradas</span></div>
+            </section>
 
             <section className="card wide">
-              <h2>Gasto mensal</h2>
-              <div className="analyticsGrid">
-                {monthlySummary.slice(0, 6).map(month => (
-                  <div className="analyticsCard" key={month.month}>
-                    <span>{new Date(`${month.month}T00:00:00`).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}</span>
-                    <strong>{money(month.total_spent)}</strong>
-                    <small>{month.item_count} itens • {month.market_count} mercado(s)</small>
+              <h2>Evolução por mês</h2>
+              <div className="monthlyInsightList">
+                {insightMonthlyTotals.map(item => (
+                  <div className="monthlyInsightRow" key={item.month}>
+                    <span>{new Date(`${item.month}-01T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</span>
+                    <strong>{money(item.total)}</strong>
                   </div>
                 ))}
-                {monthlySummary.length === 0 && <p className="empty">Importe cupons para gerar o histórico mensal.</p>}
+                {insightMonthlyTotals.length === 0 && <p className="empty">Nenhum lançamento encontrado para os filtros selecionados.</p>}
               </div>
+            </section>
+
+            <section className="card">
+              <h2>Gastos por mercado</h2>
+              <MiniRows rows={marketTotals.map(item => ({ title: item.market, note: money(item.total) }))} empty="Nenhum mercado no período." />
+            </section>
+
+            <section className="card">
+              <h2>Produtos com maior gasto</h2>
+              <MiniRows rows={topPurchasedProducts.map(product => ({ title: product.name, note: `${money(product.total)} • ${product.count} registro(s)` }))} empty="Nenhum produto no período." />
             </section>
 
             <section className="card wide">
-              <h2>Inteligência V8</h2>
-              <div className="analyticsGrid">
-                <div className="analyticsPanel">
-                  <h3>Produtos recorrentes</h3>
-                  <MiniRows rows={recurringInsights.slice(0, 6).map(item => ({ title: item.product_name, note: `${item.purchase_count} compra(s) • média ${money(item.avg_unit_price)}` }))} empty="Ainda não há recorrência suficiente." />
-                </div>
-                <div className="analyticsPanel">
-                  <h3>Inflação percebida</h3>
-                  <MiniRows rows={biggestInflation.map(item => ({ title: item.product_name, note: `${Number(item.variation_pct || 0).toFixed(1)}% • ${money(item.first_price)} para ${money(item.last_price)}` }))} empty="Ainda não há histórico suficiente." />
-                </div>
-                <div className="analyticsPanel">
-                  <h3>Favoritos em alerta</h3>
-                  <MiniRows rows={favoritesWithAlert.slice(0, 6).map(item => ({ title: item.product_name, note: `Preço desejado: ${money(item.desired_price)}` }))} empty="Marque favoritos e preço desejado no banco para ativar alertas." />
+              <div className="cardTop">
+                <div>
+                  <h2>Resumo do filtro</h2>
+                  <p className="muted">Uma leitura rápida do conjunto selecionado.</p>
                 </div>
               </div>
-            </section>
-
-            <section className="card">
-              <h2>Gastos por supermercado</h2>
-              <MiniRows rows={marketTotals.map(item => ({ title: item.market, note: money(item.total) }))} empty="Importe cupons para comparar mercados." />
-            </section>
-
-            <section className="card">
-              <h2>Produtos mais relevantes</h2>
-              <MiniRows rows={topPurchasedProducts.map(product => ({ title: product.name, note: `${money(product.total)} • ${product.count} registros` }))} empty="Importe cupons para gerar análises." />
-            </section>
-
-            <section className="card">
-              <h2>Maiores altas</h2>
-              <MiniRows rows={risingProducts.map(product => ({ title: product.name, note: `${money(product.last_price)} vs média ${money(product.avg_price)}` }))} empty="Ainda não há histórico suficiente." />
+              <div className="insightSummaryText">
+                <p><strong>{filteredInsightPurchases.length}</strong> itens somaram <strong>{money(insightTotalPurchased)}</strong> em <strong>{insightPurchaseCount}</strong> compra(s).</p>
+                <p>{marketTotals[0] ? <>O maior gasto ocorreu no <strong>{marketTotals[0].market}</strong>, com <strong>{money(marketTotals[0].total)}</strong>.</> : 'Não há mercado para destacar.'}</p>
+                <p>{topPurchasedProducts[0] ? <>O produto com maior impacto foi <strong>{topPurchasedProducts[0].name}</strong>, somando <strong>{money(topPurchasedProducts[0].total)}</strong>.</> : 'Não há produto para destacar.'}</p>
+              </div>
             </section>
           </section>
         )}
