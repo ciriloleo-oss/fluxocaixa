@@ -1339,7 +1339,7 @@ function App() {
 
   const insightDateRange = useMemo(() => {
     const today = new Date();
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
     let start: Date | null = null;
     let rangeEnd: Date | null = end;
 
