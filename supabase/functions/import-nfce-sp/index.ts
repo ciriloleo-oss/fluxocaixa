@@ -561,7 +561,7 @@ Deno.serve(async req => {
     }
 
     if (couponImportId) {
-      await supabase
+      const { data: persistedCoupon, error: couponUpdateError } = await supabase
         .from('coupon_imports')
         .update({
           status: 'imported',
@@ -587,7 +587,17 @@ Deno.serve(async req => {
           },
           error_message: null,
         })
-        .eq('id', couponImportId);
+        .eq('id', couponImportId)
+        .select('id, gross_total, total_discount, paid_total, purchase_date')
+        .single();
+
+      if (couponUpdateError || !persistedCoupon) {
+        throw new Error(`Erro ao persistir totais do cupom: ${couponUpdateError?.message || 'sem retorno'}`);
+      }
+
+      if (Number(persistedCoupon.paid_total) !== Number(couponTotals.paidTotal)) {
+        throw new Error('O total pago extraído não foi persistido corretamente no cupom.');
+      }
     }
 
     if (couponImportId) {

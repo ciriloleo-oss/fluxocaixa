@@ -97,6 +97,7 @@ type CouponImport = {
   processed_at: string | null;
   error_message: string | null;
   created_at: string;
+  access_key?: string | null;
   gross_total?: number | null;
   total_discount?: number | null;
   paid_total?: number | null;
@@ -248,6 +249,17 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function extractAccessKeyFromQrUrl(value: string) {
+  try {
+    const decoded = decodeURIComponent(value || '');
+    const match = decoded.match(/[?&]p=(\d{44})/i) || decoded.match(/(\d{44})/);
+    return match?.[1] || null;
+  } catch {
+    const match = String(value || '').match(/(\d{44})/);
+    return match?.[1] || null;
+  }
+}
+
 const CATEGORY_ORDER = [
   'Hortifruti',
   'Laticínios',
@@ -352,6 +364,8 @@ function App() {
   const [qrUrl, setQrUrl] = useState('');
   const [scanMessage, setScanMessage] = useState('');
   const [importingId, setImportingId] = useState<string | null>(null);
+  const [globalTotalsRefreshing, setGlobalTotalsRefreshing] = useState(false);
+  const [globalTotalsMessage, setGlobalTotalsMessage] = useState('');
 
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -1204,10 +1218,48 @@ function App() {
     const cleanUrl = url.trim();
     if (!cleanUrl) return;
 
+    setScanMessage('Validando QR Code...');
+    const accessKey = extractAccessKeyFromQrUrl(cleanUrl);
+
+    if (accessKey) {
+      const { data: existingByKey } = await supabase
+        .from('coupon_imports')
+        .select('id, status, store_name')
+        .eq('access_key', accessKey)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingByKey) {
+        setQrUrl('');
+        setScanMessage(`Esta NFC-e já está cadastrada (${existingByKey.store_name || 'mercado'} • ${existingByKey.status}).`);
+        await loadCoupons();
+        setPage('cupons');
+        return;
+      }
+    }
+
+    const { data: existingByUrl } = await supabase
+      .from('coupon_imports')
+      .select('id, status, store_name')
+      .eq('qr_url', cleanUrl)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingByUrl) {
+      setQrUrl('');
+      setScanMessage(`Este QR Code já está cadastrado (${existingByUrl.store_name || 'mercado'} • ${existingByUrl.status}).`);
+      await loadCoupons();
+      setPage('cupons');
+      return;
+    }
+
     setScanMessage('Salvando QR Code...');
 
     const { error } = await supabase.from('coupon_imports').insert({
       qr_url: cleanUrl,
+      access_key: accessKey,
       store_name: 'Montserrat Jundiaí',
       uf: 'SP',
       status: 'captured'
@@ -1233,13 +1285,60 @@ function App() {
     if (error) {
       alert(`Erro ao importar cupom: ${error.message}`);
     } else if (data?.ok) {
-      alert(`Cupom importado com sucesso. Itens importados: ${data.imported_items}`);
+      const totals = data?.paid_total != null
+        ? `\nBruto: ${money(data.gross_total)}\nDesconto: ${money(data.total_discount)}\nPago: ${money(data.paid_total)}`
+        : '';
+      alert(`Cupom atualizado com sucesso. Itens importados: ${data.imported_items}${totals}`);
     } else {
       alert(data?.error || 'Não foi possível importar o cupom.');
     }
 
     setImportingId(null);
     await loadAll();
+  }
+
+  async function refreshAllMissingCouponTotals() {
+    if (globalTotalsRefreshing) return;
+
+    const ok = confirm('Atualizar os totais pendentes de NFC-e para todos os usuários? A rotina altera apenas os totais dos cupons e não recria os itens das compras.');
+    if (!ok) return;
+
+    setGlobalTotalsRefreshing(true);
+    setGlobalTotalsMessage('Iniciando atualização global...');
+
+    let totalUpdated = 0;
+    let totalFailed = 0;
+    let remaining = 0;
+
+    try {
+      for (let round = 1; round <= 10; round += 1) {
+        const { data, error } = await supabase.functions.invoke('refresh-nfce-totals', {
+          body: { only_missing: true, limit: 30 }
+        });
+
+        if (error) throw error;
+        if (!data?.ok) throw new Error(data?.error || 'Falha na atualização global.');
+
+        totalUpdated += Number(data.updated || 0);
+        totalFailed += Number(data.failed || 0);
+        remaining = Number(data.remaining || 0);
+
+        setGlobalTotalsMessage(`Atualizados: ${totalUpdated} • Falhas: ${totalFailed} • Pendentes: ${remaining}`);
+
+        if (remaining <= 0 || Number(data.updated || 0) === 0) break;
+      }
+
+      await loadAll();
+      setGlobalTotalsMessage(
+        remaining > 0
+          ? `Atualização concluída parcialmente: ${totalUpdated} atualizados, ${totalFailed} falhas e ${remaining} ainda pendentes.`
+          : `Atualização concluída: ${totalUpdated} cupom(ns) atualizado(s).${totalFailed ? ` ${totalFailed} falha(s) para revisar.` : ''}`
+      );
+    } catch (error: any) {
+      setGlobalTotalsMessage(`Erro na atualização global: ${error?.message || 'erro desconhecido'}`);
+    } finally {
+      setGlobalTotalsRefreshing(false);
+    }
   }
 
 
@@ -1410,7 +1509,8 @@ function App() {
     for (const coupon of coupons) {
       if (coupon.status !== 'imported') continue;
       const grossTotal = Number(coupon.gross_total ?? couponGrossById.get(coupon.id) ?? 0);
-      const paidTotal = coupon.paid_total == null ? grossTotal : Number(coupon.paid_total);
+      const hasPaidTotal = coupon.paid_total != null;
+      const paidTotal = hasPaidTotal ? Number(coupon.paid_total) : 0;
       entries.push({
         id: `coupon-${coupon.id}`,
         date: coupon.purchase_date || coupon.processed_at?.slice(0, 10) || coupon.created_at.slice(0, 10),
@@ -1419,7 +1519,7 @@ function App() {
         total: paidTotal,
         grossTotal,
         discount: coupon.total_discount == null ? null : Number(coupon.total_discount),
-        isExactPaidTotal: coupon.paid_total != null,
+        isExactPaidTotal: hasPaidTotal,
       });
     }
 
@@ -1453,9 +1553,15 @@ function App() {
 
   const insightUsesItemScope = Boolean(insightProduct.trim()) || insightCategory !== 'Todas';
   const itemScopedGrossTotal = filteredInsightPurchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
-  const cashflowPaidTotal = filteredCashflowEntries.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
-  const cashflowGrossTotal = filteredCashflowEntries.reduce((sum, entry) => sum + Number(entry.grossTotal || 0), 0);
-  const cashflowDiscountTotal = Math.max(0, cashflowGrossTotal - cashflowPaidTotal);
+  const confirmedCashflowEntries = filteredCashflowEntries.filter(entry => entry.source !== 'nfce-sp' || entry.isExactPaidTotal);
+  const cashflowPaidTotal = confirmedCashflowEntries.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+  const cashflowGrossTotal = confirmedCashflowEntries.reduce((sum, entry) => sum + Number(entry.grossTotal || 0), 0);
+  const cashflowDiscountTotal = confirmedCashflowEntries.reduce((sum, entry) => {
+    const discount = entry.discount == null
+      ? Math.max(0, Number(entry.grossTotal || 0) - Number(entry.total || 0))
+      : Number(entry.discount || 0);
+    return sum + discount;
+  }, 0);
   const couponsWithoutExactPaidTotal = filteredCashflowEntries.filter(entry => entry.source === 'nfce-sp' && !entry.isExactPaidTotal).length;
 
   // Quando produto/categoria estão filtrados, não existe rateio confiável do desconto geral do cupom.
@@ -1464,10 +1570,10 @@ function App() {
   const insightProductCount = new Set(filteredInsightPurchases.map(item => canonicalPurchase(item).productId || canonicalPurchase(item).normalizedName)).size;
   const insightMarketCount = insightUsesItemScope
     ? new Set(filteredInsightPurchases.map(item => item.store_name || 'Sem mercado')).size
-    : new Set(filteredCashflowEntries.map(item => item.market)).size;
+    : new Set(confirmedCashflowEntries.map(item => item.market)).size;
   const insightPurchaseCount = insightUsesItemScope
     ? new Set(filteredInsightPurchases.map(item => item.coupon_import_id || `${item.purchase_date}-${item.store_name || 'manual'}`)).size
-    : filteredCashflowEntries.length;
+    : confirmedCashflowEntries.length;
   const insightAverageTicket = insightPurchaseCount ? insightTotalPurchased / insightPurchaseCount : 0;
   const insightAverageItem = filteredInsightPurchases.length ? insightTotalPurchased / filteredInsightPurchases.length : 0;
   const totalPurchased = cashflowEntries.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
@@ -1481,7 +1587,7 @@ function App() {
         map.set(market, (map.get(market) || 0) + Number(purchase.total_price || 0));
       }
     } else {
-      for (const entry of filteredCashflowEntries) {
+      for (const entry of confirmedCashflowEntries) {
         map.set(entry.market, (map.get(entry.market) || 0) + Number(entry.total || 0));
       }
     }
@@ -1490,7 +1596,7 @@ function App() {
       .map(([market, total]) => ({ market, total }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
-  }, [filteredInsightPurchases, filteredCashflowEntries, insightUsesItemScope]);
+  }, [filteredInsightPurchases, confirmedCashflowEntries, insightUsesItemScope]);
 
   const topPurchasedProducts = useMemo(() => {
     const map = new Map<string, { name: string; total: number; count: number; quantity: number }>();
@@ -1516,7 +1622,7 @@ function App() {
         map.set(month, (map.get(month) || 0) + Number(purchase.total_price || 0));
       }
     } else {
-      for (const entry of filteredCashflowEntries) {
+      for (const entry of confirmedCashflowEntries) {
         const month = entry.date.slice(0, 7);
         map.set(month, (map.get(month) || 0) + Number(entry.total || 0));
       }
@@ -1525,7 +1631,7 @@ function App() {
       .map(([month, total]) => ({ month, total }))
       .sort((a, b) => b.month.localeCompare(a.month))
       .slice(0, 12);
-  }, [filteredInsightPurchases, filteredCashflowEntries, insightUsesItemScope]);
+  }, [filteredInsightPurchases, confirmedCashflowEntries, insightUsesItemScope]);
 
   function clearInsightFilters() {
     setInsightPeriod('currentMonth');
@@ -2387,7 +2493,7 @@ function App() {
               <div className="insightSummaryText">
                 <p><strong>{filteredInsightPurchases.length}</strong> itens em <strong>{insightPurchaseCount}</strong> compra(s) representam <strong>{money(insightTotalPurchased)}</strong> {insightUsesItemScope ? 'em valor bruto dos itens filtrados.' : 'efetivamente pagos.'}</p>
                 {!insightUsesItemScope && cashflowDiscountTotal > 0 && <p>O valor bruto foi <strong>{money(cashflowGrossTotal)}</strong> e os descontos gerais dos cupons somaram <strong>{money(cashflowDiscountTotal)}</strong>.</p>}
-                {!insightUsesItemScope && couponsWithoutExactPaidTotal > 0 && <p className="muted">Há <strong>{couponsWithoutExactPaidTotal}</strong> cupom(ns) antigo(s) sem total efetivamente pago armazenado. Use “Atualizar totais” na aba Cupom.</p>}
+                {!insightUsesItemScope && couponsWithoutExactPaidTotal > 0 && <p className="muted">Há <strong>{couponsWithoutExactPaidTotal}</strong> cupom(ns) antigo(s) sem total efetivamente pago armazenado. Use a atualização global na aba Cupom.</p>}
                 <p>{marketTotals[0] ? <>O maior gasto ocorreu no <strong>{marketTotals[0].market}</strong>, com <strong>{money(marketTotals[0].total)}</strong>.</> : 'Não há mercado para destacar.'}</p>
                 <p>{topPurchasedProducts[0] ? <>O produto com maior impacto foi <strong>{topPurchasedProducts[0].name}</strong>, somando <strong>{money(topPurchasedProducts[0].total)}</strong>.</> : 'Não há produto para destacar.'}</p>
               </div>
@@ -2410,10 +2516,23 @@ function App() {
               <div className="cardTop">
                 <div>
                   <h2>Cupons NFC-e</h2>
-                  <p className="muted">{pendingCoupons.length} pendentes • {importedCoupons.length} importados</p>
+                  <p className="muted">{pendingCoupons.length} pendentes • {importedCoupons.length} importados • {coupons.filter(coupon => coupon.status === 'imported' && coupon.paid_total == null).length} sem total pago</p>
                 </div>
                 <button onClick={loadCoupons}><RefreshCw size={18} /> Atualizar</button>
               </div>
+
+              {user?.email === 'cirilo.leo@gmail.com' && (
+                <div className="globalTotalsPanel">
+                  <div>
+                    <strong>Manutenção global dos totais</strong>
+                    <span>Reprocessa somente os totais pendentes de NFC-e de todas as casas, sem recriar os itens.</span>
+                  </div>
+                  <button type="button" onClick={refreshAllMissingCouponTotals} disabled={globalTotalsRefreshing}>
+                    <RefreshCw size={17} /> {globalTotalsRefreshing ? 'Atualizando...' : 'Atualizar totais globais'}
+                  </button>
+                  {globalTotalsMessage && <p className="notice">{globalTotalsMessage}</p>}
+                </div>
+              )}
 
               <div className="couponList">
                 {coupons.map(coupon => (
@@ -2424,9 +2543,9 @@ function App() {
                       <span>Itens importados: {coupon.imported_items || 0}</span>
                       {coupon.status === 'imported' && (
                         <span className="couponTotalsLine">
-                          Pago: <strong>{money(coupon.paid_total ?? coupon.gross_total ?? 0)}</strong>
-                          {coupon.total_discount != null && Number(coupon.total_discount) > 0 ? ` • Desconto ${money(coupon.total_discount)}` : ''}
-                          {coupon.paid_total == null ? ' • total antigo: atualizar' : ''}
+                          {coupon.paid_total == null
+                            ? <>Pago: <strong>Pendente de atualização</strong>{coupon.gross_total != null ? ` • Bruto ${money(coupon.gross_total)}` : ''}</>
+                            : <>Pago: <strong>{money(coupon.paid_total)}</strong>{coupon.total_discount != null && Number(coupon.total_discount) > 0 ? ` • Desconto ${money(coupon.total_discount)}` : ''}</>}
                         </span>
                       )}
                       {coupon.error_message && <span className="muted">Erro: {coupon.error_message}</span>}
