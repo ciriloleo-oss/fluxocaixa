@@ -2317,3 +2317,14 @@ textarea,
 /* V10 - Catálogo Inteligente */
 .catalogReviewHeader{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin:18px 0 12px}.catalogReviewHeader h3{margin:0 0 4px}.reviewCount{background:var(--soft);color:var(--accent-dark);border-radius:999px;padding:8px 11px;font-size:12px;font-weight:900;white-space:nowrap}.smartCatalogCandidates{gap:14px}.smartCandidate{display:block;padding:16px}.smartCandidate.strong{border-color:rgba(47,125,50,.45);box-shadow:0 8px 24px rgba(47,125,50,.08)}.candidateComparison{display:grid;grid-template-columns:minmax(0,1fr) 38px minmax(0,1fr);gap:10px;align-items:center}.candidateProduct{background:#fbfdf9;border:1px solid var(--line);border-radius:16px;padding:12px;min-width:0}.candidateProduct strong{font-size:14px;overflow-wrap:anywhere}.candidateProduct small{display:flex;align-items:center;gap:5px;color:var(--muted);margin-top:7px}.candidateLabel{display:block;color:var(--muted);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}.candidateLink{display:grid;place-items:center;color:var(--accent-dark)}.candidateDecision{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:12px 0}.candidateDecision small{color:var(--muted);font-size:12px}.decisionBadge{border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900;background:#fff7db;color:#7a4d00;white-space:nowrap}.decisionBadge.strong{background:var(--soft);color:var(--accent-dark)}.smartActions{display:grid;grid-template-columns:1fr 1fr auto}.smartActions button{white-space:normal}.primaryMerge{background:var(--soft)}.rejectMatch{background:#fff0f0;color:#9b2626}.rejectMatch:hover{background:#b42318;color:#fff}.catalogEmptyState{display:grid;place-items:center;text-align:center;gap:7px;padding:28px;border:1px dashed var(--line);border-radius:20px;color:var(--accent-dark)}.catalogEmptyState span{color:var(--muted);font-size:13px}.normalizationNote{margin-bottom:12px}
 @media(max-width:760px){.catalogReviewHeader,.candidateDecision{align-items:flex-start;flex-direction:column}.candidateComparison{grid-template-columns:1fr}.candidateLink{transform:rotate(90deg)}.smartActions{grid-template-columns:1fr}.smartActions button{width:100%}.reviewCount{align-self:flex-start}}
+
+/* V10.1 - total real de cupons */
+.couponTotalsLine {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.discountMetric strong {
+  color: var(--accent-dark);
+}

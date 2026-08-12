@@ -97,6 +97,10 @@ type CouponImport = {
   processed_at: string | null;
   error_message: string | null;
   created_at: string;
+  gross_total?: number | null;
+  total_discount?: number | null;
+  paid_total?: number | null;
+  purchase_date?: string | null;
 };
 
 
@@ -1346,7 +1350,7 @@ function App() {
     if (insightPeriod === 'currentMonth') start = new Date(today.getFullYear(), today.getMonth(), 1);
     if (insightPeriod === 'previousMonth') {
       start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      rangeEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+      rangeEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999);
     }
     if (insightPeriod === 'threeMonths') start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
     if (insightPeriod === 'sixMonths') start = new Date(today.getFullYear(), today.getMonth() - 5, 1);
@@ -1379,27 +1383,114 @@ function App() {
     });
   }, [purchases, products, productAliases, aliasToProductId, productById, insightDateRange, insightProduct, insightMarket, insightSource, insightCategory]);
 
-  const totalPurchased = purchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
-  const insightTotalPurchased = filteredInsightPurchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
+  const couponGrossById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const purchase of purchases) {
+      if (!purchase.coupon_import_id) continue;
+      map.set(
+        purchase.coupon_import_id,
+        (map.get(purchase.coupon_import_id) || 0) + Number(purchase.total_price || 0)
+      );
+    }
+    return map;
+  }, [purchases]);
+
+  const cashflowEntries = useMemo(() => {
+    const entries: Array<{
+      id: string;
+      date: string;
+      market: string;
+      source: string;
+      total: number;
+      grossTotal: number;
+      discount: number | null;
+      isExactPaidTotal: boolean;
+    }> = [];
+
+    for (const coupon of coupons) {
+      if (coupon.status !== 'imported') continue;
+      const grossTotal = Number(coupon.gross_total ?? couponGrossById.get(coupon.id) ?? 0);
+      const paidTotal = coupon.paid_total == null ? grossTotal : Number(coupon.paid_total);
+      entries.push({
+        id: `coupon-${coupon.id}`,
+        date: coupon.purchase_date || coupon.processed_at?.slice(0, 10) || coupon.created_at.slice(0, 10),
+        market: coupon.store_name || 'Sem mercado',
+        source: 'nfce-sp',
+        total: paidTotal,
+        grossTotal,
+        discount: coupon.total_discount == null ? null : Number(coupon.total_discount),
+        isExactPaidTotal: coupon.paid_total != null,
+      });
+    }
+
+    for (const purchase of purchases) {
+      if (purchase.coupon_import_id) continue;
+      entries.push({
+        id: `manual-${purchase.id}`,
+        date: purchase.purchase_date,
+        market: purchase.store_name || 'Sem mercado',
+        source: purchase.source || 'manual',
+        total: Number(purchase.total_price || 0),
+        grossTotal: Number(purchase.total_price || 0),
+        discount: 0,
+        isExactPaidTotal: true,
+      });
+    }
+
+    return entries;
+  }, [coupons, purchases, couponGrossById]);
+
+  const filteredCashflowEntries = useMemo(() => {
+    return cashflowEntries.filter(entry => {
+      const entryDate = new Date(`${entry.date}T12:00:00`);
+      if (insightDateRange.start && entryDate < insightDateRange.start) return false;
+      if (insightDateRange.end && entryDate > insightDateRange.end) return false;
+      if (insightMarket !== 'Todos' && entry.market !== insightMarket) return false;
+      if (insightSource !== 'Todas' && entry.source !== insightSource) return false;
+      return true;
+    });
+  }, [cashflowEntries, insightDateRange, insightMarket, insightSource]);
+
+  const insightUsesItemScope = Boolean(insightProduct.trim()) || insightCategory !== 'Todas';
+  const itemScopedGrossTotal = filteredInsightPurchases.reduce((sum, purchase) => sum + Number(purchase.total_price || 0), 0);
+  const cashflowPaidTotal = filteredCashflowEntries.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+  const cashflowGrossTotal = filteredCashflowEntries.reduce((sum, entry) => sum + Number(entry.grossTotal || 0), 0);
+  const cashflowDiscountTotal = Math.max(0, cashflowGrossTotal - cashflowPaidTotal);
+  const couponsWithoutExactPaidTotal = filteredCashflowEntries.filter(entry => entry.source === 'nfce-sp' && !entry.isExactPaidTotal).length;
+
+  // Quando produto/categoria estão filtrados, não existe rateio confiável do desconto geral do cupom.
+  // Nesse caso mostramos o valor bruto das linhas selecionadas. Nos demais filtros, usamos o total efetivamente pago.
+  const insightTotalPurchased = insightUsesItemScope ? itemScopedGrossTotal : cashflowPaidTotal;
   const insightProductCount = new Set(filteredInsightPurchases.map(item => canonicalPurchase(item).productId || canonicalPurchase(item).normalizedName)).size;
-  const insightMarketCount = new Set(filteredInsightPurchases.map(item => item.store_name || 'Sem mercado')).size;
-  const insightPurchaseCount = new Set(filteredInsightPurchases.map(item => item.coupon_import_id || `${item.purchase_date}-${item.store_name || 'manual'}`)).size;
+  const insightMarketCount = insightUsesItemScope
+    ? new Set(filteredInsightPurchases.map(item => item.store_name || 'Sem mercado')).size
+    : new Set(filteredCashflowEntries.map(item => item.market)).size;
+  const insightPurchaseCount = insightUsesItemScope
+    ? new Set(filteredInsightPurchases.map(item => item.coupon_import_id || `${item.purchase_date}-${item.store_name || 'manual'}`)).size
+    : filteredCashflowEntries.length;
   const insightAverageTicket = insightPurchaseCount ? insightTotalPurchased / insightPurchaseCount : 0;
   const insightAverageItem = filteredInsightPurchases.length ? insightTotalPurchased / filteredInsightPurchases.length : 0;
+  const totalPurchased = cashflowEntries.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
 
   const marketTotals = useMemo(() => {
     const map = new Map<string, number>();
 
-    for (const purchase of filteredInsightPurchases) {
-      const market = purchase.store_name || 'Sem mercado';
-      map.set(market, (map.get(market) || 0) + Number(purchase.total_price || 0));
+    if (insightUsesItemScope) {
+      for (const purchase of filteredInsightPurchases) {
+        const market = purchase.store_name || 'Sem mercado';
+        map.set(market, (map.get(market) || 0) + Number(purchase.total_price || 0));
+      }
+    } else {
+      for (const entry of filteredCashflowEntries) {
+        map.set(entry.market, (map.get(entry.market) || 0) + Number(entry.total || 0));
+      }
     }
 
     return Array.from(map.entries())
       .map(([market, total]) => ({ market, total }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
-  }, [filteredInsightPurchases]);
+  }, [filteredInsightPurchases, filteredCashflowEntries, insightUsesItemScope]);
 
   const topPurchasedProducts = useMemo(() => {
     const map = new Map<string, { name: string; total: number; count: number; quantity: number }>();
@@ -1419,15 +1510,22 @@ function App() {
 
   const insightMonthlyTotals = useMemo(() => {
     const map = new Map<string, number>();
-    for (const purchase of filteredInsightPurchases) {
-      const month = purchase.purchase_date.slice(0, 7);
-      map.set(month, (map.get(month) || 0) + Number(purchase.total_price || 0));
+    if (insightUsesItemScope) {
+      for (const purchase of filteredInsightPurchases) {
+        const month = purchase.purchase_date.slice(0, 7);
+        map.set(month, (map.get(month) || 0) + Number(purchase.total_price || 0));
+      }
+    } else {
+      for (const entry of filteredCashflowEntries) {
+        const month = entry.date.slice(0, 7);
+        map.set(month, (map.get(month) || 0) + Number(entry.total || 0));
+      }
     }
     return Array.from(map.entries())
       .map(([month, total]) => ({ month, total }))
       .sort((a, b) => b.month.localeCompare(a.month))
       .slice(0, 12);
-  }, [filteredInsightPurchases]);
+  }, [filteredInsightPurchases, filteredCashflowEntries, insightUsesItemScope]);
 
   function clearInsightFilters() {
     setInsightPeriod('currentMonth');
@@ -2189,7 +2287,7 @@ function App() {
               <div className="cardTop">
                 <div>
                   <h2>Filtros dos insights</h2>
-                  <p className="muted">Os valores abaixo consideram apenas os filtros selecionados.</p>
+                  <p className="muted">Cashflow usa o valor efetivamente pago no cupom. Preços de produtos continuam usando os valores individuais sem ratear descontos gerais.</p>
                 </div>
                 <button type="button" onClick={clearInsightFilters}><RefreshCw size={16} /> Limpar</button>
               </div>
@@ -2248,10 +2346,11 @@ function App() {
             </section>
 
             <section className="insightMetricGrid wide">
-              <div className="insightMetric primary"><small>Total gasto</small><strong>{money(insightTotalPurchased)}</strong><span>{insightPurchaseCount} compra(s) no período</span></div>
+              <div className="insightMetric primary"><small>{insightUsesItemScope ? 'Valor bruto dos itens' : 'Total efetivamente pago'}</small><strong>{money(insightTotalPurchased)}</strong><span>{insightUsesItemScope ? 'Desconto geral não é rateado por produto' : `${insightPurchaseCount} compra(s) no período`}</span></div>
               <div className="insightMetric"><small>Ticket médio</small><strong>{money(insightAverageTicket)}</strong><span>Média por compra</span></div>
               <div className="insightMetric"><small>Itens registrados</small><strong>{filteredInsightPurchases.length}</strong><span>{insightProductCount} produto(s) diferente(s)</span></div>
               <div className="insightMetric"><small>Mercados</small><strong>{insightMarketCount}</strong><span>{marketTotals[0] ? `Maior gasto: ${marketTotals[0].market}` : 'Sem registros'}</span></div>
+              {!insightUsesItemScope && <div className="insightMetric discountMetric"><small>Descontos no período</small><strong>{money(cashflowDiscountTotal)}</strong><span>{couponsWithoutExactPaidTotal ? `${couponsWithoutExactPaidTotal} cupom(ns) antigo(s) precisam atualizar totais` : 'Diferença entre bruto e valor pago'}</span></div>}
               <div className="insightMetric"><small>Média por item</small><strong>{money(insightAverageItem)}</strong><span>Valor médio das linhas compradas</span></div>
             </section>
 
@@ -2286,7 +2385,9 @@ function App() {
                 </div>
               </div>
               <div className="insightSummaryText">
-                <p><strong>{filteredInsightPurchases.length}</strong> itens somaram <strong>{money(insightTotalPurchased)}</strong> em <strong>{insightPurchaseCount}</strong> compra(s).</p>
+                <p><strong>{filteredInsightPurchases.length}</strong> itens em <strong>{insightPurchaseCount}</strong> compra(s) representam <strong>{money(insightTotalPurchased)}</strong> {insightUsesItemScope ? 'em valor bruto dos itens filtrados.' : 'efetivamente pagos.'}</p>
+                {!insightUsesItemScope && cashflowDiscountTotal > 0 && <p>O valor bruto foi <strong>{money(cashflowGrossTotal)}</strong> e os descontos gerais dos cupons somaram <strong>{money(cashflowDiscountTotal)}</strong>.</p>}
+                {!insightUsesItemScope && couponsWithoutExactPaidTotal > 0 && <p className="muted">Há <strong>{couponsWithoutExactPaidTotal}</strong> cupom(ns) antigo(s) sem total efetivamente pago armazenado. Use “Atualizar totais” na aba Cupom.</p>}
                 <p>{marketTotals[0] ? <>O maior gasto ocorreu no <strong>{marketTotals[0].market}</strong>, com <strong>{money(marketTotals[0].total)}</strong>.</> : 'Não há mercado para destacar.'}</p>
                 <p>{topPurchasedProducts[0] ? <>O produto com maior impacto foi <strong>{topPurchasedProducts[0].name}</strong>, somando <strong>{money(topPurchasedProducts[0].total)}</strong>.</> : 'Não há produto para destacar.'}</p>
               </div>
@@ -2321,13 +2422,20 @@ function App() {
                       <strong>Status: {coupon.status}</strong>
                       <span>{coupon.store_name || 'Mercado'} • {new Date(coupon.created_at).toLocaleString('pt-BR')}</span>
                       <span>Itens importados: {coupon.imported_items || 0}</span>
+                      {coupon.status === 'imported' && (
+                        <span className="couponTotalsLine">
+                          Pago: <strong>{money(coupon.paid_total ?? coupon.gross_total ?? 0)}</strong>
+                          {coupon.total_discount != null && Number(coupon.total_discount) > 0 ? ` • Desconto ${money(coupon.total_discount)}` : ''}
+                          {coupon.paid_total == null ? ' • total antigo: atualizar' : ''}
+                        </span>
+                      )}
                       {coupon.error_message && <span className="muted">Erro: {coupon.error_message}</span>}
                       <span className="couponUrl" title={coupon.qr_url}>{coupon.qr_url}</span>
                     </div>
 
                     <div className="couponActions">
-                      <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id || coupon.status === 'imported'}>
-                        {importingId === coupon.id ? 'Importando...' : coupon.status === 'imported' ? 'Importado' : 'Importar'}
+                      <button onClick={() => importCoupon(coupon)} disabled={importingId === coupon.id}>
+                        {importingId === coupon.id ? 'Atualizando...' : coupon.status === 'imported' ? 'Atualizar totais' : 'Importar'}
                       </button>
                       <button type="button" className="dangerButton" onClick={() => removeCoupon(coupon)} disabled={importingId === coupon.id}>
                         <Trash2 size={16} /> Remover

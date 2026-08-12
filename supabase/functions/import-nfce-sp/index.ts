@@ -23,6 +23,14 @@ type ParsedItem = {
   netUnitPrice: number;
 };
 
+type CouponTotals = {
+  grossTotal: number;
+  totalDiscount: number;
+  paidTotal: number;
+  purchaseDate: string;
+};
+
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -112,6 +120,36 @@ function extractDiscountAmount(text: string) {
   }
 
   return 0;
+}
+
+function extractCouponTotals(html: string, items: ParsedItem[]): CouponTotals {
+  const text = stripTags(html);
+  const itemGrossTotal = items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
+
+  const grossTotal =
+    toNumber(text.match(/Valor\s+total\s+R\$\s*:?\s*([\d.,]+)/i)?.[1]) ||
+    itemGrossTotal;
+
+  const totalDiscount =
+    toNumber(text.match(/Descontos?\s+R\$\s*:?\s*([\d.,]+)/i)?.[1]) ||
+    0;
+
+  const paidTotal =
+    toNumber(text.match(/Valor\s+a\s+pagar\s+R\$\s*:?\s*([\d.,]+)/i)?.[1]) ||
+    Math.max(0, grossTotal - totalDiscount) ||
+    itemGrossTotal;
+
+  const emission = text.match(/Emiss[aã]o\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+  const purchaseDate = emission
+    ? `${emission[3]}-${emission[2]}-${emission[1]}`
+    : new Date().toISOString().slice(0, 10);
+
+  return {
+    grossTotal: Number(grossTotal.toFixed(2)),
+    totalDiscount: Number(totalDiscount.toFixed(2)),
+    paidTotal: Number(paidTotal.toFixed(2)),
+    purchaseDate,
+  };
 }
 
 function normalizeProductName(name: string) {
@@ -436,6 +474,7 @@ Deno.serve(async req => {
     const detectedStoreName = resolvedMarketName || rawDetectedStoreName || 'Mercado não identificado';
 
     const items = parseItemsFromHtml(fetched.html);
+    const couponTotals = extractCouponTotals(fetched.html, items);
 
     if (items.length === 0) {
       const preview = stripTags(fetched.html).slice(0, 2000);
@@ -453,6 +492,10 @@ Deno.serve(async req => {
               detected_store_name: detectedStoreName,
               raw_detected_store_name: rawDetectedStoreName,
               html_preview: preview,
+              gross_total: couponTotals.grossTotal,
+              total_discount: couponTotals.totalDiscount,
+              paid_total: couponTotals.paidTotal,
+              purchase_date: couponTotals.purchaseDate,
             },
             error_message:
               'Não foi possível extrair itens do HTML da SEFAZ/SP. Pode haver captcha, bloqueio ou mudança de layout.',
@@ -503,7 +546,7 @@ Deno.serve(async req => {
         discount_amount: item.discountAmount || 0,
         net_unit_price: item.netUnitPrice || item.unitPrice,
         total_price: item.totalPrice,
-        purchase_date: new Date().toISOString().slice(0, 10),
+        purchase_date: couponTotals.purchaseDate,
         source: 'nfce-sp',
         coupon_import_id: couponImportId || null,
         household_id: effectiveHouseholdId,
@@ -527,11 +570,19 @@ Deno.serve(async req => {
           store_name: detectedStoreName,
           user_id: effectiveUserId,
           household_id: effectiveHouseholdId,
+          gross_total: couponTotals.grossTotal,
+          total_discount: couponTotals.totalDiscount,
+          paid_total: couponTotals.paidTotal,
+          purchase_date: couponTotals.purchaseDate,
           raw_payload: {
             access_key: accessKey,
             issuer_cnpj: issuerCnpj,
             detected_store_name: detectedStoreName,
             raw_detected_store_name: rawDetectedStoreName,
+            gross_total: couponTotals.grossTotal,
+            total_discount: couponTotals.totalDiscount,
+            paid_total: couponTotals.paidTotal,
+            purchase_date: couponTotals.purchaseDate,
             items,
           },
           error_message: null,
@@ -549,6 +600,10 @@ Deno.serve(async req => {
       issuer_cnpj: issuerCnpj,
       store_name: detectedStoreName,
       imported_items: importedCount,
+      gross_total: couponTotals.grossTotal,
+      total_discount: couponTotals.totalDiscount,
+      paid_total: couponTotals.paidTotal,
+      purchase_date: couponTotals.purchaseDate,
       items,
     });
   } catch (error) {
